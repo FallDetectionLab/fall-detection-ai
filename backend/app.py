@@ -77,6 +77,24 @@ def ingest_frame():
     }, 200
 
 
+@app.get("/events")
+def list_events():
+    rows = Event.query.order_by(Event.t_event.desc()).limit(50).all()
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "device_id": r.device_id,
+                "t_event": r.t_event.isoformat(),
+                "path": r.path,
+                "type": r.type,
+            }
+            for r in rows
+        ],
+        "count": len(rows),
+    }
+
+
 # --- 4) 실행 (맨 마지막) ---
 if __name__ == "__main__":
     print(">>> Flask 서버 시작")
