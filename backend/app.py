@@ -128,8 +128,7 @@ def ingest_clip():
         "ts": ts,
     }, 200
 
-
-# --- 6) 이벤트 리스트 ---
+  
 @app.get("/events")
 def list_events():
     rows = Event.query.order_by(Event.t_event.desc()).limit(50).all()
@@ -141,7 +140,6 @@ def list_events():
                 "t_event": r.t_event.isoformat(),
                 "path": r.path,
                 "type": r.type,
-                "url": f"/media/{r.path}" if r.path else None,
             }
             for r in rows
         ],
@@ -149,7 +147,6 @@ def list_events():
     }
 
 
-# --- 7) 실행 ---
 if __name__ == "__main__":
     print(">>> Flask 서버 시작")
     print(">>> AUTH in server =", repr(AUTH))
