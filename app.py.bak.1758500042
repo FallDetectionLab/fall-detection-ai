@@ -1,0 +1,693 @@
+# app.py  — SafeFall API (final)
+import os, time
+from datetime import datetime
+from urllib.parse import urlparse
+
+from flask import Flask, request, jsonify, send_from_directory, Blueprint
+from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
+from dotenv import load_dotenv
+
+# boto3 / botocore
+import boto3
+from botocore.exceptions import ClientError, NoCredentialsError
+from botocore.config import Config as BotoCfg
+
+import io
+import urllib.request
+import numpy as np
+from PIL import Image
+from flask import jsonify
+import sys
+
+_TORCH_IMPORT_ERR = None
+try:
+	import torch
+except Exception as e:
+	torch = None
+	_TORCH_IMPORT_ERR = str(e)
+# -----------------------------
+# 0) 기본 설정 / ENV
+# -----------------------------
+load_dotenv()  # .env 읽기
+
+app = Flask(__name__)
+app.url_map.strict_slashes = False
+
+# === CORS 허용 Origin 목록 ===
+ALLOWED_ORIGINS = [
+    # 개발
+    "http://localhost:5173",
+    "http://localhost:3000",
+    # 배포
+    "http://safefall2.s3-website.ap-northeast-2.amazonaws.com",
+]
+
+CORS(
+    app,
+    resources={r"/*": {"origins": ALLOWED_ORIGINS}},
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+    expose_headers=["Content-Length", "Content-Range"],
+    supports_credentials=False,
+)
+
+# 인증 토큰
+AUTH = f"Bearer {os.getenv('AUTH_TOKEN', '')}"
+
+# 로컬 미디어 저장소
+MEDIA_ROOT = os.getenv("MEDIA_ROOT", "./media")
+os.makedirs(MEDIA_ROOT, exist_ok=True)
+
+# --- S3 설정 (버킷명은 순수 문자열이어야 함)
+def normalize_bucket(b: str | None) -> str | None:
+    if not b:
+        return b
+    b = b.strip()
+    if b.startswith(("http://", "https://")):
+        host = urlparse(b).netloc
+        return host.split(".")[0]  # 첫 라벨을 버킷명으로
+    return b
+
+S3_BUCKET = normalize_bucket(os.getenv("S3_BUCKET", "safefall2"))
+S3_REGION = os.getenv("AWS_REGION", "ap-northeast-2")
+
+# ⚠️ IAM Role을 쓰려면 IMDS 접근이 필요합니다.
+#    이전 코드에서 'true'로 강제 비활성화되어 있었던 부분을 끕니다.
+# os.environ.setdefault("AWS_EC2_METADATA_DISABLED", "true")
+os.environ["AWS_EC2_METADATA_DISABLED"] = os.getenv("AWS_EC2_METADATA_DISABLED", "false")
+
+BOTO_CFG = BotoCfg(
+    signature_version="s3v4",
+    retries={"max_attempts": 2, "mode": "standard"},
+    connect_timeout=2,
+    read_timeout=3,
+)
+_s3 = boto3.client("s3", region_name=S3_REGION, config=BOTO_CFG)
+
+# -----------------------------
+# 1) DB 설정
+# -----------------------------
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///safefall.db"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+db = SQLAlchemy(app)
+
+class Event(db.Model):
+    __tablename__ = "events"
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    device_id = db.Column(db.String(64), nullable=False)
+    t_event = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    path = db.Column(db.String(512))   # 저장된 파일 경로 또는 S3 key
+    type = db.Column(db.String(16), default="normal")  # normal/frame/fall 등
+    is_checked = db.Column(db.Boolean, default=False)
+
+class User(db.Model):
+    __tablename__ = "users"
+    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    password = db.Column(db.String(100), nullable=False)  # 실제로는 해시 사용 권장
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+with app.app_context():
+    db.create_all()
+    # 초기 더미 유저
+    if User.query.count() == 0:
+        for u, p in [("네이버","12345678!"),("구글","12345678!"),("카카오","12345678!"),("dumydata","12345678!")]:
+            db.session.add(User(username=u, password=p))
+        db.session.commit()
+
+# -----------------------------
+# 2) 유틸
+# -----------------------------
+def authed(req) -> bool:
+    return req.headers.get("Authorization", "") == AUTH
+
+def utc_iso_now() -> str:
+    return datetime.utcnow().isoformat() + "Z"
+
+def paginate_query(query, page=1, limit=10):
+    total = query.count()
+    items = query.offset((page - 1) * limit).limit(limit).all()
+    return {
+        "data": items,
+        "pagination": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "total_pages": (total + limit - 1) // limit,
+            "has_next": page * limit < total,
+            "has_prev": page > 1
+        }
+    }
+
+def build_media_url(path: str | None) -> str | None:
+    """로컬 파일이 있으면 /api 경로, 아니면 S3 퍼블릭 URL로 반환"""
+    if not path:
+        return None
+    local_full = os.path.join(MEDIA_ROOT, path)
+    if os.path.exists(local_full):
+        return f"/api/v1/media/{path}"
+    return f"https://{S3_BUCKET}.s3.{S3_REGION}.amazonaws.com/{path}"
+
+# === YOLOv5 설정 ===
+YOLOV5_WEIGHTS = os.getenv("MODEL_PATH", "/srv/flaskapp/best.pt")  # wget으로 받아둔 best.pt 경로
+YOLOV5_REPO    = os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5")  # 로컬 yolov5 폴더 있으면 우선 사용
+YOLOV5_IMG_SZ  = int(os.getenv("IMG_SIZE", "640"))
+YOLOV5_CONF    = float(os.getenv("CONF_THRES", "0.25"))
+
+_yolo5_cache = {"model": None, "names": None}
+
+def load_yolov5():
+    """
+    YOLOv5 모델 lazy-load + 캐시.
+    - /srv/flaskapp/yolov5 존재하면 source='local'
+    - 없으면 source='github'
+    """
+    import sys, os, torch
+
+    if 'torch' not in globals() or torch is None:
+        return None, None, "torch_not_installed"
+
+    if _yolo5_cache["model"] is not None:
+        return _yolo5_cache["model"], _yolo5_cache["names"], None
+
+    if not os.path.exists(YOLOV5_WEIGHTS):
+        return None, None, f"weights_not_found:{YOLOV5_WEIGHTS}"
+
+    try:
+        # YOLOv5 repo를 sys.path에 등록
+        sys.path.insert(0, YOLOV5_REPO)
+
+        # PyTorch 2.6+ 에서 안전 로드 허용
+        from torch.serialization import add_safe_globals
+        from models.yolo import DetectionModel
+	from models.common import Conv, Bottleneck, C3, SPPF, Concat, Focus, BottleneckCSP, C2f
+        from torch.nn.modules.container import Sequential
+        add_safe_globals([DetectionModel, Conv, Bottleneck, C3, SPPF, Concat, Focus, BottleneckCSP, C2f])
+
+        # Torch cache 디렉토리 지정
+        torch.hub.set_dir(os.environ.get("TORCH_HOME", "/srv/flaskapp/.cache/torch"))
+
+        # 모델 로드
+        if os.path.isdir(YOLOV5_REPO):
+            model = torch.hub.load(
+                YOLOV5_REPO if os.path.isdir(YOLOV5_REPO) else "ultralytics/yolov5",
+                "custom",
+                path=YOLOV5_WEIGHTS,
+                source="local" if os.path.isdir(YOLOV5_REPO) else "github",
+                force_reload=True,   # 캐시만 갱신할 때 True
+                trust_repo=True
+            )
+        else:
+            model = torch.hub.load(
+                "ultralytics/yolov5",
+                "custom",
+                path=YOLOV5_WEIGHTS,
+                source="github",
+                force_reload=False,
+                trust_repo=True
+            )
+
+        # 클래스 이름 가져오기
+        names = model.names if hasattr(model, "names") else []
+        _yolo5_cache["model"], _yolo5_cache["names"] = model, names
+        return model, names, None
+
+    except Exception as e:
+        return None, None, f"load_error:{e}"
+
+def _image_from_request(req_json):
+    """
+    입력 이미지를 PIL.Image로:
+      - multipart/form-data: field 'image'
+      - application/json: {'s3_key': '...'} 또는 {'s3_url': 'https://...'}
+    """
+    # 업로드 파일
+    if "image" in request.files:
+        f = request.files["image"]
+        try:
+            return Image.open(io.BytesIO(f.read())).convert("RGB"), None
+        except Exception as e:
+            return None, f"invalid image file: {e}"
+
+    # JSON: S3 key / URL
+    if req_json:
+        k = req_json.get("s3_key")
+        if k:
+            try:
+                obj = _s3.get_object(Bucket=S3_BUCKET, Key=k)
+                data = obj["Body"].read()
+                return Image.open(io.BytesIO(data)).convert("RGB"), None
+            except Exception as e:
+                return None, f"failed to read s3://{S3_BUCKET}/{k}: {e}"
+
+        u = req_json.get("s3_url")
+        if u:
+            try:
+                with urllib.request.urlopen(u, timeout=5) as r:
+                    data = r.read()
+                return Image.open(io.BytesIO(data)).convert("RGB"), None
+            except Exception as e:
+                return None, f"failed to fetch url: {e}"
+
+    return None, "no image provided (multipart 'image' OR json 's3_key'/'s3_url')"
+
+
+# -----------------------------
+# 3) CORS Preflight / 공통 헤더
+# -----------------------------
+@app.route("/", methods=["OPTIONS"])
+@app.route("/<path:anypath>", methods=["OPTIONS"])
+def cors_preflight(anypath=None):
+    return ("", 204)
+
+@app.route("/api/v1", methods=["OPTIONS"])
+@app.route("/api/v1/<path:anypath>", methods=["OPTIONS"])
+def cors_preflight_api(anypath=None):
+    return ("", 204)
+
+# 루트 헬스체크(ALB용)
+@app.get("/health")
+def health_root():
+    return {"ok": True}
+
+@app.after_request
+def add_cors_headers(resp):
+    origin = request.headers.get("Origin", "")
+    if origin in ALLOWED_ORIGINS:
+        resp.headers["Access-Control-Allow-Origin"] = origin
+        resp.headers["Vary"] = "Origin"
+    resp.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+    resp.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization,X-Requested-With"
+    resp.headers["Access-Control-Max-Age"] = "600"
+    return resp
+
+# -----------------------------
+# 4) API v1 (Blueprint)
+# -----------------------------
+api = Blueprint("api", __name__, url_prefix="/api/v1")
+
+# 4-1) 헬스
+@api.get("/health")
+def health():
+    return {"ok": True, "msg": "SafeFall API Server", "version": "1.0.0"}
+
+# 4-2) 인증
+@api.post("/auth/login")
+def login():
+    data = request.get_json(force=True, silent=True) or {}
+    username = data.get("username")
+    password = data.get("password")
+    if not username or not password:
+        return {"code": "BAD_REQUEST", "message": "username and password required"}, 400
+    user = User.query.filter_by(username=username, password=password).first()
+    if not user:
+        return {"code": "UNAUTHORIZED", "message": "Invalid credentials"}, 401
+    return {
+        "accessToken": f"dummy_token_{user.id}_{int(time.time())}",
+        "refreshToken": f"refresh_token_{user.id}",
+        "user": {"id": user.username, "name": user.username}
+    }, 200
+
+@api.get("/auth/check-session")
+def check_session():
+    auth_header = request.headers.get("Authorization", "")
+    if "dummy_token_" in auth_header:
+        return {"valid": True, "user": {"id": "current_user"}}, 200
+    return {"valid": False}, 401
+
+# -------------------------------------------------
+# ✅ 4-A) S3 Presign (PUT 업로드)
+# -------------------------------------------------
+@api.post("/media/presign", endpoint="media_presign_put")
+def media_presign_put():
+    if not authed(request):
+        return {"code": "UNAUTHORIZED", "message": "invalid token"}, 401
+
+    data = request.get_json(force=True, silent=True) or {}
+    key = data.get("key")
+    content_type = data.get("content_type", "application/octet-stream")
+    if not key:
+        return {"code": "BAD_REQUEST", "message": "key required"}, 400
+
+    # (임시 디버그) 실제 런타임의 크레덴셜 소스 확인
+    try:
+        import boto3
+        cs = getattr(boto3.Session().get_credentials(), "method", None)
+        print({"creds_source": cs})
+    except Exception:
+        pass
+
+    try:
+        url = _s3.generate_presigned_url(
+            ClientMethod="put_object",
+            Params={"Bucket": S3_BUCKET, "Key": key, "ContentType": content_type},
+            ExpiresIn=3600,
+            HttpMethod="PUT",
+        )
+        return {"url": url, "method": "PUT", "expiresIn": 3600}, 200
+
+    except NoCredentialsError:
+        return {"code":"NO_AWS_CREDS","message":"No AWS credentials available"}, 500
+    except ClientError as e:
+        return {"code":"S3_ERROR","message":str(e)}, 500
+    except Exception as e:
+        return {"code":"INTERNAL","message":str(e)}, 500
+
+# ✅ 4-B) (S3 업로드 후) 이벤트 메타데이터 등록
+@api.post("/events/register")
+def events_register():
+    """
+    Body: { "device_id": "pi-01", "key": "frames/pi-01/test.jpg", "type": "fall" }
+    """
+    if not authed(request):
+        return {"code": "UNAUTHORIZED", "message": "invalid token"}, 401
+
+    data = request.get_json(force=True, silent=True) or {}
+    device_id = data.get("device_id", "unknown")
+    key = data.get("key")
+    ev_type = data.get("type", "fall")
+    if not key:
+        return {"code": "BAD_REQUEST", "message": "key required"}, 400
+
+    evt = Event(device_id=device_id, path=key, type=ev_type)
+    db.session.add(evt)
+    db.session.commit()
+
+    return {
+        "ok": True,
+        "event": {
+            "id": evt.id,
+            "device_id": evt.device_id,
+            "t_event": evt.t_event.isoformat() if evt.t_event else None,
+            "path": evt.path,
+            "type": evt.type,
+            "url": build_media_url(evt.path),
+        }
+    }, 200
+
+# 4-4) 영상 목록
+@api.get("/videos")
+def get_videos():
+    page = int(request.args.get("page", 1))
+    limit = int(request.args.get("limit", 10))
+    sort_by = request.args.get("sortBy", "t_event")
+    sort_order = request.args.get("sortOrder", "desc")
+    search = request.args.get("search", "")
+    is_checked = request.args.get("isChecked")
+    type_filter = request.args.get("type")
+
+    query = Event.query
+    if search:
+        query = query.filter(Event.path.like(f"%{search}%"))
+    if is_checked is not None:
+        is_checked_bool = str(is_checked).lower() == "true"
+        query = query.filter(Event.is_checked == is_checked_bool)
+    if type_filter:
+        query = query.filter(Event.type == type_filter)
+
+    column = getattr(Event, sort_by, Event.t_event)
+    query = query.order_by(column.desc() if sort_order == "desc" else column.asc())
+
+    result = paginate_query(query, page, limit)
+    videos = []
+    for e in result["data"]:
+        filename = e.path.split("/")[-1] if e.path else f"event_{e.id}.mp4"
+        videos.append({
+            "id": e.id,
+            "filename": filename,
+            "createdAt": e.t_event.isoformat() if e.t_event else utc_iso_now(),
+            "isChecked": e.is_checked,
+            "device_id": e.device_id,
+            "type": e.type,
+            "path": e.path,
+            "url": build_media_url(e.path),
+        })
+    return {"data": videos, "pagination": result["pagination"]}, 200
+
+# 4-5) 영상 상세
+@api.get("/videos/<video_id>")
+def get_video_detail(video_id):
+    e = Event.query.get_or_404(video_id)
+    filename = e.path.split("/")[-1] if e.path else f"event_{e.id}.mp4"
+    return {
+        "id": e.id,
+        "filename": filename,
+        "createdAt": e.t_event.isoformat() if e.t_event else utc_iso_now(),
+        "isChecked": e.is_checked,
+        "device_id": e.device_id,
+        "type": e.type,
+        "path": e.path,
+        "url": build_media_url(e.path),
+        "size": "unknown",
+        "duration": "unknown"
+    }, 200
+
+# 4-6) 상태 업데이트
+@api.patch("/videos/<video_id>/status")
+def update_video_status(video_id):
+    data = request.get_json(force=True, silent=True) or {}
+    is_checked = data.get("isChecked")
+    if is_checked is None:
+        return {"code": "BAD_REQUEST", "message": "isChecked field required"}, 400
+    e = Event.query.get_or_404(video_id)
+    e.is_checked = bool(is_checked)
+    db.session.commit()
+    return {"success": True, "message": "Status updated successfully", "isChecked": e.is_checked}, 200
+
+# 4-7) 삭제
+@api.delete("/videos/<video_id>")
+def delete_video(video_id):
+    e = Event.query.get_or_404(video_id)
+    if e.path and os.path.exists(os.path.join(MEDIA_ROOT, e.path)):
+        try:
+            os.remove(os.path.join(MEDIA_ROOT, e.path))
+        except Exception:
+            pass
+    db.session.delete(e)
+    db.session.commit()
+    return {"success": True, "message": "Video deleted successfully"}, 200
+
+# 4-8) 대시보드
+@api.get("/dashboard/stats")
+def get_dashboard_stats():
+    total = Event.query.count()
+    checked = Event.query.filter_by(is_checked=True).count()
+    unchecked = total - checked
+    today = datetime.utcnow().date()
+    today_videos = Event.query.filter(Event.t_event >= datetime.combine(today, datetime.min.time())).count()
+    return {
+        "totalVideos": total,
+        "checkedVideos": checked,
+        "uncheckedVideos": unchecked,
+        "todayVideos": today_videos,
+        "checkRate": round((checked / total * 100) if total > 0 else 0, 1)
+    }, 200
+
+@api.get("/dashboard/recent-videos")
+def get_recent_videos():
+    limit = int(request.args.get("limit", 6))
+    rows = Event.query.order_by(Event.t_event.desc()).limit(limit).all()
+    videos = []
+    for e in rows:
+        filename = e.path.split("/")[-1] if e.path else f"event_{e.id}.mp4"
+        videos.append({
+            "id": e.id,
+            "filename": filename,
+            "createdAt": e.t_event.isoformat() if e.t_event else utc_iso_now(),
+            "isChecked": e.is_checked,
+            "device_id": e.device_id,
+            "type": e.type,
+            "url": build_media_url(e.path),
+        })
+    return {"data": videos}, 200
+
+@api.get("/dashboard/chart-data")
+def get_chart_data():
+    period = request.args.get("period", "month")
+    if period == "month":
+        data = []
+        for month in range(1, 13):
+            start = datetime(2024, month, 1)
+            end = datetime(2025, 1, 1) if month == 12 else datetime(2024, month + 1, 1)
+            month_events = Event.query.filter(Event.t_event >= start, Event.t_event < end).count()
+            checked_count = Event.query.filter(
+                Event.t_event >= start, Event.t_event < end, Event.is_checked == True
+            ).count()
+            data.append({
+                "date": f"{month:02d}월",
+                "xPosition": month,
+                "total": month_events,
+                "checked": checked_count,
+                "unchecked": month_events - checked_count
+            })
+        return {"data": data}, 200
+    return {"data": []}, 200
+
+# 4-9) 스트림 정보/상태 (더미)
+@api.get("/stream/live")
+def get_live_stream():
+    return {"streamUrl": "http://192.168.0.6:5000", "type": "http", "status": "online", "quality": "720p"}, 200
+
+@api.get("/stream/status")
+def get_stream_status():
+    return {"status": "online", "uptime": "24h 15m", "viewers": 1}, 200
+
+# 4-10) 로컬 미디어 파일 서빙(GET)
+@api.get("/media/<path:subpath>")
+def get_media(subpath):
+    full = os.path.join(MEDIA_ROOT, subpath)
+    d, f = os.path.split(full)
+    resp = send_from_directory(d, f)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+# 4-11) 로컬 저장 — 프레임
+@api.post("/ingest/frame")
+def ingest_frame():
+    if not authed(request):
+        return {"code": "UNAUTHORIZED", "message": "invalid token"}, 401
+    file = request.files.get("frame")
+    device_id = request.form.get("device_id", "unknown")
+    if not file:
+        return {"code": "BAD_REQUEST", "message": "no frame file"}, 400
+    day = datetime.utcnow().strftime("%Y/%m/%d")
+    save_dir = os.path.join(MEDIA_ROOT, day, device_id)
+    os.makedirs(save_dir, exist_ok=True)
+    fname = f"snapshot_{int(time.time())}.jpg"
+    rel_key = os.path.join(day, device_id, fname)
+    path = os.path.join(MEDIA_ROOT, rel_key)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    file.save(path)
+    evt = Event(device_id=device_id, path=rel_key, type="frame")
+    db.session.add(evt); db.session.commit()
+    return {
+        "ok": True,
+        "event": {
+            "id": evt.id, "device_id": evt.device_id,
+            "t_event": evt.t_event.isoformat(), "path": evt.path,
+            "url": build_media_url(evt.path), "type": evt.type,
+        },
+        "ts": request.form.get("ts"),
+    }, 200
+
+# 4-12) 로컬 저장 — 클립
+@api.post("/ingest/clip")
+def ingest_clip():
+    if not authed(request):
+        return {"code": "UNAUTHORIZED", "message": "invalid token"}, 401
+    file = request.files.get("clip")
+    device_id = request.form.get("device_id", "unknown")
+    if not file:
+        return {"code": "BAD_REQUEST", "message": "no clip file"}, 400
+    day = datetime.utcnow().strftime("%Y/%m/%d")
+    save_dir = os.path.join(MEDIA_ROOT, day, device_id)
+    os.makedirs(save_dir, exist_ok=True)
+    fname = f"clip_{int(time.time())}.mp4"
+    rel_key = os.path.join(day, device_id, fname)
+    path = os.path.join(MEDIA_ROOT, rel_key)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    file.save(path)
+    evt = Event(device_id=device_id, path=rel_key, type="fall")
+    db.session.add(evt); db.session.commit()
+    return {
+        "ok": True,
+        "event": {
+            "id": evt.id, "device_id": evt.device_id,
+            "t_event": evt.t_event.isoformat(), "path": evt.path,
+            "url": build_media_url(evt.path), "type": evt.type,
+        },
+        "ts": request.form.get("ts"),
+    }, 200
+
+# === YOLOv5 헬스 ===
+@api.get("/detect/health")
+def detect_health_v5():
+    try:
+        torch_ok = ('torch' in globals()) and (globals().get('torch') is not None)
+        model, names, err = load_yolov5()
+
+        # torch 자체 import 실패면 그 이유를 우선 표기
+        if not torch_ok and (globals().get('_TORCH_IMPORT_ERR')):
+            err = f"torch_import_error: {globals().get('_TORCH_IMPORT_ERR')}"
+
+        payload = {
+            "ok": bool(model is not None and err is None),
+            "torch_ok": bool(torch_ok),
+            "model_path": YOLOV5_WEIGHTS if 'YOLOV5_WEIGHTS' in globals() else None,
+            "repo": (YOLOV5_REPO if ('YOLOV5_REPO' in globals() and os.path.isdir(YOLOV5_REPO)) else "github(hub)"),
+            "has_names": bool(names),
+            "conf": YOLOV5_CONF if 'YOLOV5_CONF' in globals() else None,
+            "img_size": YOLOV5_IMG_SZ if 'YOLOV5_IMG_SZ' in globals() else None,
+            "err": (str(err) if err else None),
+            # 디버깅 보조 정보
+            "py": sys.version.split()[0],
+            "exe": sys.executable,
+        }
+        return jsonify(payload), (200 if payload["ok"] else 503)
+
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"health_failed:{str(e)}"}), 500
+
+# === YOLOv5 감지 (기존과 충돌 피하려고 endpoint 이름 지정)
+@api.post("/detect", endpoint="detect_v5")
+def detect_v5():
+    if not authed(request):
+        return {"code": "UNAUTHORIZED", "message": "invalid token"}, 401
+
+    model, names, err = load_yolov5()
+    if err or model is None:
+        return {"ok": False, "error": err or "model_not_loaded"}, 500
+
+    req_json = request.get_json(silent=True) if request.is_json else None
+    img, err2 = _image_from_request(req_json)
+    if err2:
+        return {"ok": False, "error": err2}, 400
+
+    w, h = img.size
+    t0 = time.time()
+
+    try:
+        np_img = np.array(img)  # RGB
+        results = model(np_img, size=YOLOV5_IMG_SZ)  # 결과: results.xyxy[0] → [x1,y1,x2,y2,conf,cls]
+        dets = []
+        for *xyxy, conf, cls in results.xyxy[0].tolist():
+            x1, y1, x2, y2 = [float(round(v, 2)) for v in xyxy]
+            label = str(int(cls))
+            if names and int(cls) in range(len(names)):
+                label = str(names[int(cls)])
+            dets.append({
+                "label": label,
+                "confidence": float(round(conf, 4)),
+                "box": [x1, y1, x2, y2]
+            })
+        elapsed_ms = round((time.time() - t0) * 1000.0, 2)
+        return {"ok": True, "detections": dets, "elapsed_ms": elapsed_ms, "meta": {"width": w, "height": h}}, 200
+    except Exception as e:
+        return {"ok": False, "error": f"inference_failed:{e}"}, 500
+
+
+# 블루프린트 등록
+app.register_blueprint(api)
+
+# 간단 요청 로그 & 라우트 덤프
+@app.before_request
+def _log_path():
+    try:
+        print(f"[REQ] {request.method} {request.path}")
+    except Exception:
+        pass
+
+@app.get("/__routes")
+def __routes():
+    return {"rules": [str(r) for r in app.url_map.iter_rules()]}
+
+# -----------------------------
+# 5) 로컬 실행 (개발용)
+# -----------------------------
+if __name__ == "__main__":
+    print(">>> SafeFall Flask 서버 시작")
+    print(">>> AUTH in server =", repr(AUTH))
+    print(">>> S3_BUCKET =", repr(S3_BUCKET), " / AWS_REGION =", repr(S3_REGION))
+    print(">>> CORS Origins =", ALLOWED_ORIGINS)
+    app.run(host="0.0.0.0", port=8000, debug=True)

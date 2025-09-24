@@ -1,0 +1,139 @@
+# utils/app_utils.py  — robust auto loader (v8→v5, manual v5 fallback)
+import os,sys,types,threading
+
+AUTH = f"Bearer {os.getenv('AUTH_TOKEN', '')}"
+
+def authed(req):
+    return req.headers.get("Authorization", "") == AUTH
+
+_yolo_cache = {"flavor": None, "model": None, "names": None}
+_lock = threading.Lock()
+
+def _normalize_names(names):
+    if isinstance(names, list):
+        return {i: n for i, n in enumerate(names)}
+    if isinstance(names, dict):
+        return names
+    return {}
+
+def _ensure_v5_repo_on_path():
+    repo = os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5")
+    if os.path.isdir(repo) and repo not in sys.path:
+        # append만 사용 (insert(0) 금지)
+        sys.path.append(repo)
+    return repo
+
+def _is_v5_model(inner):
+    mod = getattr(inner, "__module__", "") or ""
+    cls = inner.__class__.__name__ if inner is not None else ""
+    return ("models.yolo" in mod) or ("models.common" in mod) or (cls == "DetectionModel")
+
+def clear_model_cache():
+    with _lock:
+        _yolo_cache.update(flavor=None, model=None, names=None)
+
+def load_yolo_auto():
+    """
+    1) YOLOV5_REPO를 sys.path에 먼저 올린다.
+    2) ultralytics.YOLO(weights) 로드 → 내부가 v5면 v5로, 아니면 v8로.
+    3) 여전히 'models.yolo' 못 찾으면 repo 추가 후 재시도.
+    4) 최후에는 v5 수동 언피클(torch.load + safe globals)로 로드.
+    """
+    with _lock:
+        if _yolo_cache["model"] is not None:
+            return _yolo_cache["flavor"], _yolo_cache["model"], _yolo_cache["names"], None
+
+        weights = os.getenv("YOLO_WEIGHTS", "/srv/flaskapp/best.pt")
+
+        # 0) v5 레포를 우선 sys.path에 올려서 언피클 의존성 만족시키기
+        repo = _ensure_v5_repo_on_path()
+
+        # 1) ultralytics 경로 시도
+        try:
+            from ultralytics import YOLO
+            m = YOLO(weights)
+            names = _normalize_names(getattr(m, "names", {}))
+            inner = getattr(m, "model", m)
+
+            if _is_v5_model(inner):
+                _yolo_cache.update(flavor="v5", model=inner, names=names)
+                return "v5", inner, names, None
+
+            _yolo_cache.update(flavor="v8", model=m, names=names)
+            return "v8", m, names, None
+
+        except Exception as e1:
+            msg1 = str(e1)
+
+            # 2) 'models.yolo' 관련이면 repo 재보장 + 재시도
+            if "No module named 'models.yolo'" in msg1 or "models.yolo" in msg1:
+                _ensure_v5_repo_on_path()
+                try:
+                    from ultralytics import YOLO
+                    m = YOLO(weights)
+                    names = _normalize_names(getattr(m, "names", {}))
+                    inner = getattr(m, "model", m)
+
+                    if _is_v5_model(inner):
+                        _yolo_cache.update(flavor="v5", model=inner, names=names)
+                        return "v5", inner, names, None
+
+                    _yolo_cache.update(flavor="v8", model=m, names=names)
+                    return "v8", m, names, None
+
+                except Exception as e2:
+                    # 3) 최후: v5 수동 언피클
+                    return _manual_load_v5(weights, f"v8_fail:{e1} / v8_retry_fail:{e2}")
+
+            # 다른 이유의 실패도 수동 v5 로더 시도
+            return _manual_load_v5(weights, f"v8_fail:{e1}")
+
+def _manual_load_v5(weights, prev_err_msg):
+    """
+    YOLOv5 수동 로더:
+      - yolov5 레포의 클래스들을 torch.serialization.safe_globals에 등록
+      - torch.load(weights, weights_only=False)로 ckpt 언피클
+      - ckpt['model'] 사용
+    """
+    try:
+        import torch
+        from torch.serialization import add_safe_globals, safe_globals
+
+        # yolov5 소스 임포트(경로는 이미 _ensure_v5_repo_on_path()에서 추가됨)
+        from sf_models.yolo import DetectionModel  # noqa
+        add_safe_globals([DetectionModel])
+
+        try:
+            from models import common as cm
+            allow = []
+            for name in ("Conv", "Bottleneck", "C3", "SPPF", "Concat", "Focus", "BottleneckCSP"):
+                if hasattr(cm, name):
+                    allow.append(getattr(cm, name))
+            if allow:
+                add_safe_globals(allow)
+        except Exception:
+            pass
+
+        import torch.nn as nn
+        add_safe_globals([
+            nn.Conv2d, nn.BatchNorm2d, nn.SiLU, nn.ReLU, nn.LeakyReLU,
+            nn.Upsample, nn.MaxPool2d, nn.AdaptiveAvgPool2d,
+            nn.Sequential, nn.ModuleList, nn.Module,
+        ])
+
+        # 안전 글로벌로 언피클
+        with safe_globals([]):
+            ckpt = torch.load(weights, map_location="cpu", weights_only=False)
+
+        model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+        model = model.float().cpu().eval()
+
+        names = getattr(model, "names", {})
+        if isinstance(names, list):
+            names = {i: n for i, n in enumerate(names)}
+
+        _yolo_cache.update(flavor="v5", model=model, names=names)
+        return "v5", model, names, None
+
+    except Exception as e3:
+        return "v5", None, None, f"load_failed:{prev_err_msg} / v5_manual:{e3}"

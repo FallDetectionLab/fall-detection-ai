@@ -1,0 +1,161 @@
+# utils/app_utils.py  — robust auto loader with dataloaders fix
+import os,sys,types,threading
+
+AUTH = f"Bearer {os.getenv('AUTH_TOKEN', '')}"
+
+def authed(req):
+    return req.headers.get("Authorization", "") == AUTH
+
+_yolo_cache = {"flavor": None, "model": None, "names": None}
+_lock = threading.Lock()
+
+def _normalize_names(names):
+    if isinstance(names, list):
+        return {i: n for i, n in enumerate(names)}
+    if isinstance(names, dict):
+        return names
+    return {}
+
+def _ensure_v5_repo_on_path():
+    repo = os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5")
+    if os.path.isdir(repo) and repo not in sys.path:
+        sys.path.insert(0, repo)  # 앞에 추가해서 우선순위 높임
+    return repo
+
+def _setup_yolov5_modules():
+    """YOLOv5 모듈들을 sys.modules에 미리 등록"""
+    repo = _ensure_v5_repo_on_path()
+    
+    try:
+        # YOLOv5의 utils.dataloaders를 직접 임포트해서 sys.modules에 등록
+        import importlib.util
+        
+        dataloaders_path = os.path.join(repo, 'utils', 'dataloaders.py')
+        if os.path.exists(dataloaders_path):
+            spec = importlib.util.spec_from_file_location("utils.dataloaders", dataloaders_path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules["utils.dataloaders"] = module
+            spec.loader.exec_module(module)
+            
+        # 다른 필요한 모듈들도 미리 등록
+        for module_name in ['utils.general', 'utils.torch_utils', 'models.common', 'models.yolo']:
+            if module_name not in sys.modules:
+                try:
+                    __import__(module_name)
+                except ImportError:
+                    pass  # 무시하고 계속
+                    
+    except Exception as e:
+        print(f"Warning: Could not pre-setup YOLOv5 modules: {e}")
+
+def _is_v5_model(inner):
+    mod = getattr(inner, "__module__", "") or ""
+    cls = inner.__class__.__name__ if inner is not None else ""
+    return ("models.yolo" in mod) or ("models.common" in mod) or (cls == "DetectionModel")
+
+def clear_model_cache():
+    with _lock:
+        _yolo_cache.update(flavor=None, model=None, names=None)
+
+def load_yolo_auto():
+    """
+    YOLOv5 모듈 충돌 문제 해결 버전
+    """
+    with _lock:
+        if _yolo_cache["model"] is not None:
+            return _yolo_cache["flavor"], _yolo_cache["model"], _yolo_cache["names"], None
+
+        weights = os.getenv("YOLO_WEIGHTS", "/srv/flaskapp/best.pt")
+        
+        # YOLOv5 모듈들을 미리 설정
+        _setup_yolov5_modules()
+
+        # Ultralytics 사용하지 않고 직접 v5 로드 시도
+        try:
+            return _manual_load_v5(weights, "direct_v5_load")
+        except Exception as e1:
+            # 그래도 안 되면 Ultralytics 시도
+            try:
+                from ultralytics import YOLO
+                m = YOLO(weights)
+                names = _normalize_names(getattr(m, "names", {}))
+                inner = getattr(m, "model", m)
+
+                if _is_v5_model(inner):
+                    _yolo_cache.update(flavor="v5", model=inner, names=names)
+                    return "v5", inner, names, None
+
+                _yolo_cache.update(flavor="v8", model=m, names=names)
+                return "v8", m, names, None
+
+            except Exception as e2:
+                return "v5", None, None, f"all_failed: direct_v5:{e1} / ultralytics:{e2}"
+
+def _manual_load_v5(weights, prev_err_msg):
+    """
+    완전 수동 YOLOv5 로더 - Ultralytics 우회
+    """
+    try:
+        import torch
+        from torch.serialization import add_safe_globals
+
+        repo = _ensure_v5_repo_on_path()
+        
+        # 필요한 클래스들을 safe_globals에 추가
+        safe_classes = []
+        
+        try:
+            # YOLOv5 DetectionModel
+            from models.yolo import DetectionModel
+            safe_classes.append(DetectionModel)
+        except ImportError:
+            print("Warning: Could not import models.yolo.DetectionModel")
+
+        try:
+            # YOLOv5 common 모듈 클래스들
+            from models.common import Conv, Bottleneck, C3, SPPF, Concat, Focus, BottleneckCSP, DetectMultiBackend
+            safe_classes.extend([Conv, Bottleneck, C3, SPPF, Concat, Focus, BottleneckCSP, DetectMultiBackend])
+        except ImportError as e:
+            print(f"Warning: Could not import from models.common: {e}")
+
+        # PyTorch 기본 클래스들
+        import torch.nn as nn
+        safe_classes.extend([
+            nn.Conv2d, nn.BatchNorm2d, nn.SiLU, nn.ReLU, nn.LeakyReLU,
+            nn.Upsample, nn.MaxPool2d, nn.AdaptiveAvgPool2d,
+            nn.Sequential, nn.ModuleList, nn.Module, nn.ModuleDict,
+            torch.Size, torch.Tensor,
+        ])
+
+        if safe_classes:
+            add_safe_globals(safe_classes)
+
+        # 모델 로드 (weights_only=False)
+        print(f"Loading YOLOv5 model from {weights}...")
+        ckpt = torch.load(weights, map_location="cpu", weights_only=False)
+
+        model = ckpt["model"] if isinstance(ckpt, dict) and "model" in ckpt else ckpt
+        
+        if model is None:
+            raise ValueError("Could not extract model from checkpoint")
+            
+        model = model.float().cpu().eval()
+
+        # names 추출
+        names = {}
+        if hasattr(model, "names"):
+            names = model.names
+        elif isinstance(ckpt, dict) and "names" in ckpt:
+            names = ckpt["names"]
+        
+        names = _normalize_names(names)
+
+        _yolo_cache.update(flavor="v5", model=model, names=names)
+        print(f"✓ Successfully loaded YOLOv5 model with {len(names)} classes")
+        return "v5", model, names, None
+
+    except Exception as e:
+        import traceback
+        print(f"Manual V5 load failed: {e}")
+        print(traceback.format_exc())
+        return "v5", None, None, f"manual_v5_failed:{prev_err_msg} -> {e}"

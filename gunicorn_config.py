@@ -6,7 +6,7 @@ import os
 bind = f"0.0.0.0:{os.environ.get('PORT', 5000)}"
 
 # 워커 프로세스 수 (CPU 코어 * 2 + 1)
-workers = multiprocessing.cpu_count() * 2 + 1
+workers = 1
 
 # 워커 클래스
 worker_class = "sync"
@@ -38,7 +38,7 @@ user = "www-data"
 group = "www-data"
 
 # 프리로드 (메모리 효율성)
-preload_app = True
+preload_app = False
 
 # 워커 재활용 설정
 max_requests = 1000

@@ -1,0 +1,132 @@
+import sys
+import os
+
+# 프로젝트 루트 디렉토리를 sys.path 맨 앞에 추가
+project_root = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, project_root)
+
+# 그 다음에 기존 import들...
+from flask import Flask
+from flask_cors import CORS
+from dotenv import load_dotenv
+
+from sf_models.entities import db, seed_dummy_users, ensure_tables
+from services.auth_service import auth_bp
+from services.s3_service import s3_bp
+from services.dashboard import dash_bp
+from detection.detect_routes import detect_bp
+
+load_dotenv()
+
+app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DB_URL", "sqlite:///safefall.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.url_map.strict_slashes = False
+
+# CORS (필요시 도메인 제한)
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://safefall2.s3-website.ap-northeast-2.amazonaws.com",
+]
+CORS(app,
+     resources={r"/*": {"origins": ALLOWED_ORIGINS}},
+     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
+     expose_headers=["Content-Length", "Content-Range"],
+     supports_credentials=False)
+
+# DB 초기화
+db.init_app(app)
+with app.app_context():
+    ensure_tables()
+    seed_dummy_users()
+
+# 블루프린트 등록
+app.register_blueprint(auth_bp, url_prefix="/api/v1/auth")
+app.register_blueprint(s3_bp, url_prefix="/api/v1")
+app.register_blueprint(dash_bp, url_prefix="/api/v1")
+app.register_blueprint(detect_bp, url_prefix="/api/v1")
+
+@app.get("/health")
+def health_root():
+    return {"ok": True, "msg": "SafeFall API Server", "version": "1.0.0"}
+
+@app.get("/__envcheck")
+def envcheck():
+    import os
+    return {
+        "YOLO_WEIGHTS": os.getenv("YOLO_WEIGHTS"),
+        "os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5")": os.getenv("os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5")"),
+        "S3_BUCKET": os.getenv("S3_BUCKET"),
+        "AWS_REGION": os.getenv("AWS_REGION"),
+    }
+
+@app.get("/__pathcheck")
+def __pathcheck():
+    import sys, os
+    return {
+        "cwd": os.getcwd(),
+        "sys_path_head": sys.path[:8],
+        "yolov5_exists": os.path.exists(os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5")),
+        "yolov5_is_dir": os.path.isdir(os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5"))
+    }
+
+@app.get("/__importcheck")
+def __importcheck():
+    import traceback
+    import sys
+    out = {
+        "sys_path": sys.path[:5],
+        "cwd": os.getcwd(),
+    }
+    
+    # YOLOV5_REPO 변수를 os.getenv로 가져와야 함
+    try:
+        yolov5_repo = os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5")
+        out["yolo_repo_exists"] = os.path.exists(yolov5_repo)
+        out["yolo_repo_is_dir"] = os.path.isdir(yolov5_repo)
+    except Exception as e:
+        out["yolo_repo_error"] = str(e)
+    
+    # YOLOv5 기본 모듈 테스트
+    try:
+        sys.path.insert(0, yolov5_repo)
+        from models.common import DetectMultiBackend
+        out["yolo_detectmultibackend"] = "✓ OK"
+    except Exception as e:
+        out["yolo_detectmultibackend_err"] = str(e)
+        out["yolo_detectmultibackend_traceback"] = traceback.format_exc()
+    
+    try:
+        from utils.torch_utils import select_device
+        out["yolo_torch_utils"] = "✓ OK"
+    except Exception as e:
+        out["yolo_torch_utils_err"] = str(e)
+    
+    # 기본 PyTorch 테스트
+    try:
+        import torch
+        out["torch_version"] = torch.__version__
+        out["cuda_available"] = torch.cuda.is_available()
+    except Exception as e:
+        out["torch_err"] = str(e)
+    
+    # utils.app_utils 테스트
+    try:
+        import importlib
+        uh = importlib.import_module("utils.helpers")
+        out["utils.helpers"] = getattr(uh, "__file__", "ok")
+    except Exception as e:
+        out["utils.helpers_err"] = str(e)
+    
+    return out
+
+@app.get("/__routes")
+def __routes():
+    return {"rules": [str(r) for r in app.url_map.iter_rules()]}
+
+if __name__ == "__main__":
+    print(">>> AUTH =", os.getenv("AUTH_TOKEN", ""))
+    print(">>> DB   =", app.config["SQLALCHEMY_DATABASE_URI"])
+    app.run(host="0.0.0.0", port=8000, debug=True)

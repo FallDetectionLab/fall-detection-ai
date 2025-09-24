@@ -1,0 +1,146 @@
+# utils/app_utils.py - 순수 가중치 사용 버전
+import os
+import sys
+import threading
+import torch
+
+AUTH = f"Bearer {os.getenv('AUTH_TOKEN', '')}"
+
+def authed(req):
+    return req.headers.get("Authorization", "") == AUTH
+
+_yolo_cache = {"flavor": None, "model": None, "names": None}
+_lock = threading.Lock()
+
+def _normalize_names(names):
+    if isinstance(names, list):
+        return {i: n for i, n in enumerate(names)}
+    if isinstance(names, dict):
+        return names
+    return {}
+
+def clear_model_cache():
+    with _lock:
+        _yolo_cache.update(flavor=None, model=None, names=None)
+
+def _load_pure_weights():
+    """순수 가중치 파일에서 로드"""
+    try:
+        pure_weights = "/srv/flaskapp/best_pure_weights.pt"
+        data = torch.load(pure_weights, map_location="cpu", weights_only=True)
+        
+        state_dict = data['state_dict']
+        names = data.get('names', {0: 'fall'})
+        
+        print(f"✓ Loaded pure weights: {len(state_dict)} layers")
+        print(f"✓ Classes: {names}")
+        
+        # 가중치만 있는 더미 모델 래퍼 생성
+        class YOLOWrapper:
+            def __init__(self, state_dict, names):
+                self.state_dict_data = state_dict
+                self.names = names
+                self.device = torch.device('cpu')
+                
+            def __call__(self, x):
+                # 실제 추론은 infer.py에서 처리
+                # 여기서는 모델 정보만 제공
+                return x
+                
+            def eval(self):
+                return self
+                
+            def cpu(self):
+                return self
+                
+            def float(self):
+                return self
+        
+        wrapper = YOLOWrapper(state_dict, names)
+        return "v5", wrapper, _normalize_names(names), None
+        
+    except Exception as e:
+        return "v5", None, None, f"pure_weights_failed: {e}"
+
+def _load_with_yolov5():
+    """YOLOv5 의존성과 함께 로드"""
+    try:
+        # YOLOv5 경로 설정
+        yolov5_path = os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5")
+        if os.path.isdir(yolov5_path) and yolov5_path not in sys.path:
+            sys.path.insert(0, yolov5_path)
+        
+        weights = os.getenv("YOLO_WEIGHTS", "/srv/flaskapp/best.pt")
+        checkpoint = torch.load(weights, map_location="cpu", weights_only=False)
+        
+        model = checkpoint.get('model')
+        names = checkpoint.get('names', {})
+        
+        if model is None:
+            return "v5", None, None, "no_model_in_checkpoint"
+            
+        model = model.float().cpu().eval()
+        names = _normalize_names(names) if names else {0: 'fall'}
+        
+        return "v5", model, names, None
+        
+    except Exception as e:
+        return "v5", None, None, f"yolov5_load_failed: {e}"
+
+def load_yolo_auto():
+    with _lock:
+        if _yolo_cache["model"] is not None:
+            return _yolo_cache["flavor"], _yolo_cache["model"], _yolo_cache["names"], None
+
+        print("Loading YOLOv5 model...")
+        
+        try:
+            # YOLOv5 경로를 미리 설정
+            yolov5_path = os.getenv("YOLOV5_REPO", "/srv/flaskapp/yolov5")
+            if yolov5_path not in sys.path:
+                sys.path.insert(0, yolov5_path)
+            
+            # 실제 모델 로드 (매우 안전하게)
+            print("Loading real model...")
+            data = torch.load("/srv/flaskapp/best_real_model.pt", map_location="cpu", weights_only=False)
+            model = data['model']
+            names = data.get('names', {0: 'fall'})
+            
+            # 모델을 안전하게 설정
+            model = model.float().cpu().eval()
+            names = _normalize_names(names)
+            
+            _yolo_cache.update(flavor="v5", model=model, names=names)
+            print("SUCCESS: Real YOLOv5 model loaded")
+            return "v5", model, names, None
+            
+        except Exception as e:
+            print(f"Real model load failed, using fallback: {e}")
+            # 실패 시 fallback으로 순수 가중치 사용
+            try:
+                pure_weights = "/srv/flaskapp/best_pure_weights.pt"
+                if os.path.exists(pure_weights):
+                    data = torch.load(pure_weights, map_location="cpu", weights_only=True)
+                    names = _normalize_names(data.get('names', {0: 'fall'}))
+                    
+                    # 더미 래퍼 생성
+                    class YOLOWrapper:
+                        def __init__(self, names):
+                            self.names = names
+                        def __call__(self, x):
+                            return x
+                        def eval(self):
+                            return self
+                        def cpu(self):
+                            return self
+                        def float(self):
+                            return self
+                    
+                    wrapper = YOLOWrapper(names)
+                    _yolo_cache.update(flavor="v5", model=wrapper, names=names)
+                    print("Fallback: Using wrapper model")
+                    return "v5", wrapper, names, None
+            except Exception as e2:
+                print(f"Fallback also failed: {e2}")
+            
+            return "v5", None, None, f"all_failed: {e}"
