@@ -1,0 +1,18 @@
+
+.unkwon {
+    width: 0;
+    height: 0;
+    overflow: hidden;
+}
+
+
+/* 더미데이터의 css의치 */
+/* 더미데이터 삭제시 같이 삭제 요망 */
+
+.dumybox001 {
+    width: 100%;
+    height: 56.25vw;
+    max-height: 810px;
+    border-radius: 24px;
+    overflow: hidden;
+}

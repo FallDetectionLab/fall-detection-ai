@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SafeFall Video Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; }
+        .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .video-item { border: 1px solid #ccc; padding: 10px; }
+        .error { color: red; }
+        .success { color: green; }
+        button { padding: 10px 20px; margin: 5px; background: #007bff; color: white; border: none; cursor: pointer; }
+        button:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SafeFall Video Test Page</h1>
+        
+        <div class="section">
+            <h2>API 테스트 버튼들</h2>
+            <button onclick="testAPI('/api/videos/saved', 'saved-result')">저장된 비디오 (최신 5개)</button>
+            <button onclick="testAPI('/api/videos/recent', 'recent-result')">최근 비디오 (최신 5개)</button>
+            <button onclick="testAPI('/api/dashboard/recent-videos', 'dashboard-result')">대시보드 비디오 (최신 3개)</button>
+            <button onclick="testAPI('/api/events/falls', 'events-result')">이벤트 목록 (최신 3개)</button>
+            <button onclick="triggerFall()">낙상 트리거</button>
+            <button onclick="startNotificationMonitor()">실시간 알림 시작</button>
+        </div>
+
+        <div class="section">
+            <h2>저장된 비디오 (API: /api/videos/saved) - 최신 5개만</h2>
+            <div id="saved-result" class="result"></div>
+            <div id="saved-videos" class="video-grid"></div>
+        </div>
+
+        <div class="section">
+            <h2>최근 비디오 (API: /api/videos/recent) - 최신 5개만</h2>
+            <div id="recent-result" class="result"></div>
+            <div id="recent-videos" class="video-grid"></div>
+        </div>
+
+        <div class="section">
+            <h2>대시보드 비디오 (API: /api/dashboard/recent-videos) - 최신 3개만</h2>
+            <div id="dashboard-result" class="result"></div>
+            <div id="dashboard-videos" class="video-grid"></div>
+        </div>
+
+        <div class="section">
+            <h2>이벤트 목록 (API: /api/events/falls) - 최신 3개만</h2>
+            <div id="events-result" class="result"></div>
+            <div id="events-videos" class="video-grid"></div>
+        </div>
+
+        <div class="section">
+            <h2>실시간 알림 로그</h2>
+            <div id="notification-log"></div>
+        </div>
+
+        <div class="section">
+            <h2>라이브 스트림</h2>
+            <img id="live-stream" src="/api/video_feed" style="max-width: 100%; height: auto;" 
+                 onerror="this.src='/api/stream/live'">
+        </div>
+    </div>
+
+    <script>
+        let notificationInterval = null;
+        let lastNotificationCheck = 0;
+
+        async function testAPI(endpoint, resultId) {
+            const resultDiv = document.getElementById(resultId);
+            resultDiv.innerHTML = '<div style="color: blue;">Loading...</div>';
+            
+            try {
+                // API URL에 limit 파라미터 추가
+                let apiUrl = endpoint;
+                if (endpoint.includes('/api/videos/saved')) {
+                    apiUrl = endpoint + '?limit=5';
+                } else if (endpoint.includes('/api/videos/recent')) {
+                    apiUrl = endpoint + '?limit=5';
+                } else if (endpoint.includes('/api/dashboard/recent-videos')) {
+                    apiUrl = endpoint + '?limit=3';
+                } else if (endpoint.includes('/api/events/falls')) {
+                    apiUrl = endpoint + '?limit=3';
+                }
+                
+                console.log('API 호출:', apiUrl);
+                const response = await fetch(apiUrl);
+                const data = await response.json();
+                
+                // JSON 결과를 최신 5개만 표시
+                let displayData = data;
+                if (data.data && Array.isArray(data.data)) {
+                    displayData = {
+                        ...data,
+                        data: data.data.slice(0, 5),
+                        count: Math.min(data.count, 5)
+                    };
+                } else if (data.videos && Array.isArray(data.videos)) {
+                    displayData = {
+                        ...data,
+                        videos: data.videos.slice(0, 5),
+                        count: Math.min(data.count, 5)
+                    };
+                }
+                
+                resultDiv.innerHTML = '<div class="success">✅ Success (최신 5개)</div><pre style="background: #f5f5f5; padding: 10px; overflow-x: auto;">' + JSON.stringify(displayData, null, 2) + '</pre>';
+                
+                // 비디오 목록 표시
+                if (data.videos || data.data) {
+                    const videosToShow = (data.videos || data.data).slice(0, 5); // 최신 5개만
+                    displayVideos(videosToShow, resultId.split('-')[0] + '-videos');
+                }
+                
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="error">❌ Error: ' + error.message + '</div>';
+            }
+        }
+
+        function displayVideos(videos, containerId) {
+            const container = document.getElementById(containerId);
+            if (!videos || videos.length === 0) {
+                container.innerHTML = '<div>비디오가 없습니다.</div>';
+                return;
+            }
+
+            let html = '';
+            for (let i = 0; i < videos.length; i++) {
+                const video = videos[i];
+                
+                // 비디오 URL 생성
+                let videoUrl = null;
+                if (video.path) {
+                    videoUrl = video.path;
+                } else if (video.url) {
+                    videoUrl = video.url;
+                } else if (video.filename || video.name) {
+                    const filename = video.filename || video.name;
+                    videoUrl = '/media/videos/' + filename;
+                }
+                
+                html += '<div class="video-item">';
+                html += '<h4>' + (video.title || video.name || video.filename || 'Untitled') + '</h4>';
+                html += '<p><strong>ID:</strong> ' + (video.id || 'N/A') + '</p>';
+                html += '<p><strong>파일명:</strong> ' + (video.filename || video.name || 'N/A') + '</p>';
+                html += '<p><strong>생성시간:</strong> ' + (video.createdAt || video.created_at || video.timestamp || video.mtime || 'N/A') + '</p>';
+                html += '<p><strong>신뢰도:</strong> ' + (video.confidence || 'N/A') + '</p>';
+                html += '<p><strong>처리됨:</strong> ' + (video.isChecked || video.processed ? '✅' : '❌') + '</p>';
+                html += '<p><strong>파일크기:</strong> ' + (video.size ? (video.size/1024/1024).toFixed(2) + ' MB' : 'N/A') + '</p>';
+                
+                if (video.description) {
+                    html += '<p><strong>설명:</strong> ' + video.description + '</p>';
+                }
+                
+                if (videoUrl) {
+                    html += '<div style="margin: 10px 0;">';
+                    html += '<button onclick="playVideo(\'' + videoUrl + '\', \'' + (video.title || video.filename || 'Video') + '\')">비디오 재생</button>';
+                    html += '<button onclick="downloadVideo(\'' + videoUrl + '\', \'' + (video.filename || 'video.mp4') + '\')">다운로드</button>';
+                    html += '</div>';
+                } else {
+                    html += '<p style="color: red;">비디오 URL 없음</p>';
+                }
+                
+                html += '</div>';
+            }
+            
+            container.innerHTML = html;
+        }
+        
+        function playVideo(videoUrl, title) {
+            console.log('비디오 재생 시도:', videoUrl);
+            
+            // 새 창에서 비디오 플레이어 열기
+            const popup = window.open('', '_blank', 'width=800,height=600');
+            const html = '<!DOCTYPE html><html><head><title>' + title + '</title><style>body { margin: 0; padding: 20px; background: #000; color: white; font-family: Arial; } video { width: 100%; max-width: 100%; height: auto; } .info { margin: 10px 0; }</style></head><body><div class="info"><h2>' + title + '</h2><p>URL: ' + videoUrl + '</p></div><video controls autoplay><source src="' + videoUrl + '" type="video/mp4"><source src="' + videoUrl + '" type="video/avi">브라우저가 비디오를 지원하지 않습니다.</video><div class="info"><button onclick="window.close()">창 닫기</button><button onclick="location.reload()">새로고침</button></div></body></html>';
+            popup.document.write(html);
+        }
+        
+        function downloadVideo(videoUrl, filename) {
+            const a = document.createElement('a');
+            a.href = videoUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+
+        async function triggerFall() {
+            try {
+                console.log('🔥 낙상 트리거 시작...');
+                
+                const response = await fetch('/api/test-fall-alert', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        confidence: 0.95,
+                        message: '테스트 낙상! ' + new Date().toLocaleTimeString()
+                    })
+                });
+                
+                const result = await response.json();
+                console.log('낙상 트리거 결과:', result);
+                
+                if (result.success) {
+                    alert('✅ 낙상 트리거 성공!\n' + result.message);
+                    
+                    // 프론트엔드에 직접 알림 전송 시도
+                    if (result.notification) {
+                        console.log('프론트엔드 알림 전송 시도...');
+                        
+                        // 프론트엔드 URL로 직접 POST 요청
+                        fetch('http://localhost:5173/api/notifications', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Access-Control-Allow-Origin': '*'
+                            },
+                            body: JSON.stringify(result.notification)
+                        }).then(response => {
+                            console.log('프론트엔드 알림 전송 응답:', response.status);
+                        }).catch(err => {
+                            console.log('프론트엔드 알림 전송 실패:', err.message);
+                        });
+                    }
+                } else {
+                    alert('❌ 낙상 트리거 실패: ' + result.error);
+                }
+                
+                // 모든 API 다시 테스트
+                setTimeout(function() {
+                    console.log('🔄 API 데이터 새로고침...');
+                    testAPI('/api/videos/saved', 'saved-result');
+                    testAPI('/api/videos/recent', 'recent-result');
+                    testAPI('/api/dashboard/recent-videos', 'dashboard-result');
+                    testAPI('/api/events/falls', 'events-result');
+                }, 2000);
+                
+            } catch (error) {
+                console.error('낙상 트리거 실패:', error);
+                alert('❌ 낙상 트리거 오류: ' + error.message);
+            }
+        }
+
+        async function checkNotifications() {
+            try {
+                const response = await fetch('/api/notifications/stream?since=' + lastNotificationCheck);
+                const data = await response.json();
+                
+                if (data.success && data.notifications && data.notifications.length > 0) {
+                    const logDiv = document.getElementById('notification-log');
+                    for (let i = 0; i < data.notifications.length; i++) {
+                        const notification = data.notifications[i];
+                        const notifDiv = document.createElement('div');
+                        notifDiv.innerHTML = '<div style="border: 1px solid #ddd; padding: 10px; margin: 5px 0; background: #f9f9f9;"><strong>' + notification.title + '</strong><br>' + notification.message + '<br><small>시간: ' + new Date(notification.timestamp * 1000).toLocaleString() + '</small></div>';
+                        logDiv.insertBefore(notifDiv, logDiv.firstChild);
+                    }
+                    
+                    // 알림이 오면 자동으로 비디오 목록 새로고침
+                    setTimeout(function() {
+                        testAPI('/api/videos/recent', 'recent-result');
+                    }, 1000);
+                }
+                
+                lastNotificationCheck = data.timestamp || Date.now() / 1000;
+                
+            } catch (error) {
+                console.error('알림 확인 실패:', error);
+            }
+        }
+
+        function startNotificationMonitor() {
+            const button = event.target;
+            
+            if (notificationInterval) {
+                clearInterval(notificationInterval);
+                notificationInterval = null;
+                button.textContent = '실시간 알림 시작';
+                button.style.background = '#007bff';
+                console.log('❌ 실시간 알림 모니터링 중지');
+                return;
+            }
+            
+            notificationInterval = setInterval(checkNotifications, 1000);
+            button.textContent = '실시간 알림 중지';
+            button.style.background = '#dc3545';
+            console.log('✅ 실시간 알림 모니터링 시작');
+            
+            // 초기 알림 로그
+            const logDiv = document.getElementById('notification-log');
+            logDiv.innerHTML = '<div style="color: green;">✅ 실시간 알림 모니터링 시작됨</div>';
+        }
+
+        // 페이지 로드시 모든 API 테스트
+        window.onload = function() {
+            testAPI('/api/videos/saved', 'saved-result');
+            testAPI('/api/videos/recent', 'recent-result');  
+            testAPI('/api/dashboard/recent-videos', 'dashboard-result');
+            testAPI('/api/events/falls', 'events-result');
+        };
+    </script>
+</body>
+</html>

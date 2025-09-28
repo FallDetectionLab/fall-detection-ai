@@ -1,0 +1,69 @@
+/* 테이블 컨테이너 */
+.data-table-container {
+  margin-top: 1.5rem; /* mt-6 */
+  /* background-color: #f9fafb; bg-gray-50 */
+  padding: 1rem; /* p-4 */
+  border-radius: 0.5rem; /* rounded-lg */
+}
+
+/* 테이블 제목 */
+.data-table-container h3 {
+  font-size: 1.125rem; /* text-lg */
+  font-weight: 600; /* font-semibold */
+  margin-bottom: 0.75rem; /* mb-3 */
+  color: #1f2937; /* text-gray-800 */
+}
+
+/* 테이블 스크롤 컨테이너 */
+.table-wrapper {
+  overflow-x: auto; /* overflow-x-auto */
+}
+
+/* 테이블 */
+.data-table {
+  width: 100%; /* w-full */
+  font-size: 0.875rem; /* text-sm */
+}
+
+/* 테이블 헤더 행 */
+.data-table thead tr {
+  background-color: #f3f4f6; /* bg-gray-100 */
+}
+
+/* 테이블 헤더 셀 */
+.data-table th {
+  padding: 0.5rem; /* p-2 */
+  font-weight: 600; /* font-semibold */
+  text-align: center;
+}
+
+.data-table th:first-child {
+  text-align: left; /* 첫 번째 th (날짜)는 왼쪽 정렬 */
+}
+
+/* 테이블 데이터 행 */
+.data-table tbody tr {
+  border-top: 1px solid #e5e7eb; /* border-t border-gray-200 */
+}
+
+/* 테이블 데이터 셀 */
+.date-cell {
+  padding: 0.5rem; /* p-2 */
+  font-weight: 500; /* font-medium */
+  text-align: left;
+  background-color: #f9fafb;
+}
+
+.count-cell {
+  text-align: center; /* text-center */
+  padding: 0.5rem; /* p-2 */
+  background-color: #f9fafb;
+}
+
+.count-cell.checked {
+  color: #059669; /* text-green-600 */
+}
+
+.count-cell.unchecked {
+  color: #ea580c; /* text-orange-600 */
+}

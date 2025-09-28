@@ -1,0 +1,214 @@
+.CheckHistorySection {
+    width: 100%;
+}
+.historyLost li {
+    width: 100%;
+    display: flex;
+    gap: 16px;
+    padding: 12px;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+.historyinfo {
+    width: calc(100% - 240px);
+    height: 135px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 8pxpx;
+}
+.historyDetailBox {
+    display: flex;
+    justify-content: space-between;
+}
+.historyCheckbox {
+    display: flex;
+    gap: 16px;
+}
+.historyThumnail {
+    width: 240px;
+    height: 135px;
+    background: rgba(34, 34, 34, 0.4);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 24px;
+}
+.historyFilename {
+    font-size: 20px;
+}
+    .historyLost li:hover {
+        box-shadow: 5px 5px 5px #222;
+    }
+@media screen and (min-width: 1200px) {
+    .historyListBox {
+        max-width: 1440px;
+        width: 100%;
+        min-width: 1200px;
+        margin: 0 auto;
+        padding: 24px;
+    }
+    .historyLost {
+        width: 100%;
+        display: flex;
+        gap: 16px;
+        flex-wrap: wrap;
+        justify-content: space-between;
+    }
+    .historyListBox li {
+        width: calc(50% - 16px);
+    }
+}
+@media screen and (max-width: 1200px) and (min-width:320px) {
+    .historyThumnail {
+        width: 240px;
+        height: 135px;
+        background: rgba(34, 34, 34, 0.4);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        border-radius: 24px;
+    }
+    .historyListBox {
+        width: 100%;
+        padding: 24px;
+    }
+    .historyLost li {
+        width: 100%;
+        border-radius: 24px;
+        margin-bottom: 24px;
+        overflow: hidden;
+    }
+    .historyDetailBox {
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .historyFilename {
+        font-size: 1.1rem;
+    }
+    .historyDetailBox > p {
+        font-size: 0.8rem;
+    }
+    .historyCheckbox {
+        width: 100%;
+        justify-content: space-between;
+        align-items: center;
+        padding-right: 12px;
+    }
+    .historyCheckbox > p {
+        font-size: 0.8rem;
+    }
+}
+@media screen and (max-width: 640px) and (min-width:320px) {
+    .historyThumnail {
+        width: 160px;
+        height: 90.45px;
+    }
+    .historyinfo {
+        width: calc(100% - 160px);
+    }
+}
+
+/*  */
+/* 페이지네이션 스타일 */
+.historyListBoxBtn {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 20px;
+  padding: 10px 0;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.pagination-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #ddd;
+  background-color: #fff;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 16px;
+  font-weight: bold;
+  transition: all 0.2s ease;
+}
+
+.pagination-arrow:hover:not(.disabled) {
+  background-color: #f5f5f5;
+  border-color: #999;
+}
+
+.pagination-arrow.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+  background-color: #f9f9f9;
+  color: #ccc;
+}
+
+.pagination-numbers {
+  display: flex;
+  gap: 4px;
+  margin: 0 8px;
+}
+
+.pagination-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #ddd;
+  background-color: #fff;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.pagination-number:hover {
+  background-color: #f5f5f5;
+  border-color: #999;
+}
+
+.pagination-number.active {
+  background-color: #69BDF9;
+  border-color: #69BDF9;
+  color: #fff;
+}
+
+.pagination-number.active:hover {
+  background-color: #0056b3;
+  border-color: #0056b3;
+}
+
+/* 반응형 디자인 */
+@media (max-width: 480px) {
+  .pagination {
+    gap: 4px;
+  }
+  
+  .pagination-arrow,
+  .pagination-number {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+  }
+  
+  .pagination-arrow {
+    font-size: 14px;
+  }
+  
+  .pagination-numbers {
+    margin: 0 4px;
+    gap: 2px;
+  }
+}

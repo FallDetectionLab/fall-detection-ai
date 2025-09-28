@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeFall - 실시간 낙상 감지</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(31, 38, 135, 0.37);
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .video-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+        
+        .video-container {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            border: 2px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .video-container h3 {
+            margin-top: 0;
+            color: #ffd700;
+            font-size: 1.3em;
+        }
+        
+        #video-feed {
+            width: 100%;
+            max-width: 500px;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            border: 3px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .control-group {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .control-group h4 {
+            margin-top: 0;
+            color: #87ceeb;
+            font-size: 1.1em;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin: 5px 0;
+            box-shadow: 0 4px 15px rgba(238, 90, 82, 0.3);
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(238, 90, 82, 0.4);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        button.secondary {
+            background: linear-gradient(45deg, #4ecdc4, #44a08d);
+            box-shadow: 0 4px 15px rgba(78, 205, 196, 0.3);
+        }
+        
+        button.secondary:hover {
+            box-shadow: 0 6px 20px rgba(78, 205, 196, 0.4);
+        }
+        
+        .status {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 5px solid #00ff7f;
+        }
+        
+        .status h4 {
+            margin-top: 0;
+            color: #00ff7f;
+        }
+        
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        
+        .info-card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .info-card h5 {
+            margin-top: 0;
+            color: #ffa500;
+            font-size: 1em;
+        }
+        
+        .info-card p {
+            margin: 8px 0;
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+        
+        .alert {
+            background: rgba(255, 0, 0, 0.1);
+            border: 2px solid #ff4757;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+        
+        .alert h3 {
+            color: #ff4757;
+            margin-top: 0;
+        }
+        
+        #notification-area {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            max-width: 400px;
+        }
+        
+        .notification {
+            background: rgba(255, 255, 255, 0.95);
+            color: #333;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 2px solid #ff4757;
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .video-section {
+                grid-template-columns: 1fr;
+            }
+            
+            .controls {
+                grid-template-columns: 1fr;
+            }
+            
+            .info-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ SafeFall 실시간 감지 시스템</h1>
+        
+        <div class="video-section">
+            <div class="video-container">
+                <h3>🎥 실시간 카메라 피드</h3>
+                <img id="video-feed" src="/video_feed" alt="실시간 영상">
+                <p>라즈베리파이 카메라에서 실시간 영상을 받아오고 있습니다.</p>
+            </div>
+            
+            <div class="video-container">
+                <h3>📊 시스템 상태</h3>
+                <div class="status">
+                    <h4>🟢 시스템 활성화</h4>
+                    <p id="system-status">정상 작동 중</p>
+                    <p id="last-update">마지막 업데이트: <span id="update-time">-</span></p>
+                </div>
+                
+                <div class="info-grid">
+                    <div class="info-card">
+                        <h5>📹 영상 상태</h5>
+                        <p id="video-status">연결됨</p>
+                        <p id="frame-rate">프레임율: 30 FPS</p>
+                    </div>
+                    <div class="info-card">
+                        <h5>🤖 AI 감지</h5>
+                        <p id="ai-status">활성화</p>
+                        <p id="confidence">신뢰도: 95%</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <h4>🚨 테스트 기능</h4>
+                <button onclick="triggerFallAlert()">낙상 알림 테스트</button>
+                <button class="secondary" onclick="checkSystemStatus()">시스템 상태 확인</button>
+            </div>
+            
+            <div class="control-group">
+                <h4>📋 데이터 관리</h4>
+                <button class="secondary" onclick="viewRecentVideos()">최근 영상 보기</button>
+                <button class="secondary" onclick="syncVideos()">영상 동기화</button>
+            </div>
+            
+            <div class="control-group">
+                <h4>🔧 설정</h4>
+                <button class="secondary" onclick="refreshStream()">스트림 새로고침</button>
+                <button class="secondary" onclick="downloadLogs()">로그 다운로드</button>
+            </div>
+        </div>
+        
+        <div id="alert-area"></div>
+    </div>
+    
+    <div id="notification-area"></div>
+    
+    <script>
+        // 전역 변수
+        let notificationPollingInterval;
+        let systemStatusInterval;
+        
+        // 페이지 로드 시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('SafeFall 시스템 초기화 중...');
+            
+            // 시스템 상태 업데이트
+            updateSystemStatus();
+            
+            // 정기적으로 시스템 상태 확인
+            systemStatusInterval = setInterval(updateSystemStatus, 5000);
+            
+            // 알림 폴링 시작
+            startNotificationPolling();
+            
+            // 영상 스트림 오류 처리
+            const videoFeed = document.getElementById('video-feed');
+            videoFeed.onerror = function() {
+                console.log('비디오 스트림 로딩 오류');
+                document.getElementById('video-status').textContent = '연결 오류';
+            };
+            
+            videoFeed.onload = function() {
+                console.log('비디오 스트림 연결됨');
+                document.getElementById('video-status').textContent = '연결됨';
+            };
+        });
+        
+        // 시스템 상태 업데이트
+        function updateSystemStatus() {
+            const now = new Date();
+            document.getElementById('update-time').textContent = now.toLocaleTimeString('ko-KR');
+            
+            // API 상태 확인
+            fetch('/api/stream/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('system-status').textContent = '정상 작동 중';
+                        document.getElementById('ai-status').textContent = '활성화';
+                    } else {
+                        document.getElementById('system-status').textContent = '오류 발생';
+                        document.getElementById('ai-status').textContent = '비활성화';
+                    }
+                })
+                .catch(error => {
+                    console.log('상태 확인 실패:', error);
+                    document.getElementById('system-status').textContent = '연결 오류';
+                });
+        }
+        
+        // 낙상 알림 테스트
+        async function triggerFallAlert() {
+            try {
+                showLoading('낙상 알림 테스트 중...');
+                
+                const response = await fetch('/api/test-fall-alert', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        confidence: 0.95
+                    })
+                });
+                
+                const result = await response.json();
+                hideLoading();
+                
+                if (result.success) {
+                    showAlert('🚨 낙상 감지 테스트', '테스트 알림이 성공적으로 발송되었습니다!', 'success');
+                    
+                    // 테스트 알림 표시
+                    if (result.notification) {
+                        showNotification(result.notification);
+                    }
+                } else {
+                    showAlert('❌ 테스트 실패', result.error || '알 수 없는 오류가 발생했습니다.', 'error');
+                }
+            } catch (error) {
+                hideLoading();
+                console.error('낙상 알림 테스트 오류:', error);
+                showAlert('❌ 연결 오류', '서버와 연결할 수 없습니다.', 'error');
+            }
+        }
+        
+        // 시스템 상태 확인
+        async function checkSystemStatus() {
+            try {
+                showLoading('시스템 상태 확인 중...');
+                
+                const response = await fetch('/api/dashboard/stats');
+                const result = await response.json();
+                
+                hideLoading();
+                
+                if (result.success) {
+                    const stats = `📊 시스템 통계
+• 총 영상: ${result.totalVideos}개
+• 확인된 영상: ${result.checkedVideos}개
+• 미확인 영상: ${result.uncheckedVideos}개
+• 오늘 영상: ${result.todayVideos}개
+• 확인률: ${result.checkRate.toFixed(1)}%`;
+                    showAlert('✅ 시스템 정상', stats, 'info');
+                } else {
+                    showAlert('⚠️ 상태 확인 실패', '시스템 상태를 가져올 수 없습니다.', 'warning');
+                }
+            } catch (error) {
+                hideLoading();
+                console.error('시스템 상태 확인 오류:', error);
+                showAlert('❌ 연결 오류', '서버와 연결할 수 없습니다.', 'error');
+            }
+        }
+        
+        // 최근 영상 보기
+        async function viewRecentVideos() {
+            try {
+                const response = await fetch('/api/videos/recent?limit=5');
+                const result = await response.json();
+                
+                if (result.success && result.videos.length > 0) {
+                    let videoList = '📹 최근 영상 목록:\n\n';
+                    result.videos.forEach((video, index) => {
+                        const date = new Date(video.created_at || video.createdAt).toLocaleString('ko-KR');
+                        videoList += `${index + 1}. ${video.filename || video.name}\n`;
+                        videoList += `   생성일: ${date}\n`;
+                        videoList += `   상태: ${video.isChecked ? '✅ 확인됨' : '⏳ 미확인'}\n\n`;
+                    });
+                    
+                    showAlert('📹 최근 영상', videoList, 'info');
+                } else {
+                    showAlert('📹 영상 없음', '저장된 영상이 없습니다.', 'info');
+                }
+            } catch (error) {
+                console.error('영상 목록 조회 오류:', error);
+                showAlert('❌ 오류', '영상 목록을 가져올 수 없습니다.', 'error');
+            }
+        }
+        
+        // 영상 동기화
+        async function syncVideos() {
+            try {
+                showLoading('영상 동기화 중...');
+                
+                const response = await fetch('/api/videos/sync', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                
+                hideLoading();
+                
+                if (result.success) {
+                    const message = `📊 동기화 완료
+• 전체 영상: ${result.total_videos}개
+• DB 영상: ${result.db_videos}개
+• 누락 발견: ${result.missing_found}개
+• 등록 완료: ${result.registered}개
+• 실패: ${result.failed}개`;
+                    showAlert('✅ 동기화 성공', message, 'success');
+                } else {
+                    showAlert('❌ 동기화 실패', result.error || '알 수 없는 오류', 'error');
+                }
+            } catch (error) {
+                hideLoading();
+                console.error('영상 동기화 오류:', error);
+                showAlert('❌ 연결 오류', '서버와 연결할 수 없습니다.', 'error');
+            }
+        }
+        
+        // 스트림 새로고침
+        function refreshStream() {
+            const videoFeed = document.getElementById('video-feed');
+            const currentSrc = videoFeed.src;
+            videoFeed.src = '';
+            setTimeout(() => {
+                videoFeed.src = currentSrc + '?t=' + Date.now();
+                showAlert('🔄 새로고침', '영상 스트림을 새로고침했습니다.', 'success');
+            }, 100);
+        }
+        
+        // 로그 다운로드 (더미)
+        function downloadLogs() {
+            showAlert('📄 로그 다운로드', '로그 다운로드 기능은 개발 중입니다.', 'info');
+        }
+        
+        // 알림 폴링 시작
+        function startNotificationPolling() {
+            notificationPollingInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/notifications/stream');
+                    const result = await response.json();
+                    
+                    if (result.success && result.notifications.length > 0) {
+                        result.notifications.forEach(notification => {
+                            showNotification(notification);
+                        });
+                    }
+                } catch (error) {
+                    // 조용히 실패 (폴링이므로 에러 메시지 표시하지 않음)
+                    console.log('알림 폴링 실패:', error);
+                }
+            }, 2000); // 2초마다 확인
+        }
+        
+        // 알림 표시
+        function showNotification(notification) {
+            const notificationArea = document.getElementById('notification-area');
+            
+            const notificationEl = document.createElement('div');
+            notificationEl.className = 'notification';
+            notificationEl.innerHTML = `
+                <h4>${notification.title || '🚨 낙상 감지 알림'}</h4>
+                <p>${notification.message}</p>
+                <p><small>시간: ${new Date(notification.timestamp * 1000).toLocaleString('ko-KR')}</small></p>
+                <p><small>신뢰도: ${(notification.confidence * 100).toFixed(1)}%</small></p>
+            `;
+            
+            notificationArea.appendChild(notificationEl);
+            
+            // 5초 후 자동 제거
+            setTimeout(() => {
+                notificationEl.remove();
+            }, 5000);
+        }
+        
+        // 일반 알림 표시
+        function showAlert(title, message, type = 'info') {
+            const alertArea = document.getElementById('alert-area');
+            
+            const alertEl = document.createElement('div');
+            alertEl.className = 'alert';
+            alertEl.innerHTML = `
+                <h3>${title}</h3>
+                <p style="white-space: pre-line;">${message}</p>
+                <button onclick="this.parentElement.remove()" style="margin-top: 10px; background: rgba(255,255,255,0.3);">닫기</button>
+            `;
+            
+            alertArea.appendChild(alertEl);
+            
+            // 10초 후 자동 제거
+            setTimeout(() => {
+                if (alertEl.parentElement) {
+                    alertEl.remove();
+                }
+            }, 10000);
+        }
+        
+        // 로딩 표시
+        function showLoading(message) {
+            showAlert('⏳ 처리 중', message, 'info');
+        }
+        
+        // 로딩 숨기기
+        function hideLoading() {
+            // 가장 최근 알림 제거 (로딩 메시지)
+            const alerts = document.querySelectorAll('.alert');
+            if (alerts.length > 0) {
+                alerts[alerts.length - 1].remove();
+            }
+        }
+        
+        // 페이지 종료 시 정리
+        window.addEventListener('beforeunload', function() {
+            if (notificationPollingInterval) {
+                clearInterval(notificationPollingInterval);
+            }
+            if (systemStatusInterval) {
+                clearInterval(systemStatusInterval);
+            }
+        });
+    </script>
+</body>
+</html>

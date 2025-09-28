@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeFall API 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .success {
+            background: #28a745;
+        }
+        .error {
+            background: #dc3545;
+        }
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .video-item {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            background: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔧 SafeFall Backend API 테스트</h1>
+    
+    <div class="container">
+        <h2>📡 연결 테스트</h2>
+        <button onclick="testConnection()">서버 연결 테스트</button>
+        <button onclick="testVideosAPI()">저장된 비디오 API 테스트</button>
+        <button onclick="testFallEventsAPI()">낙상 이벤트 API 테스트</button>
+        <button onclick="triggerTestFall()">수동 낙상 트리거 테스트</button>
+        <div id="connection-status"></div>
+    </div>
+
+    <div class="container">
+        <h2>📹 저장된 비디오 목록</h2>
+        <button onclick="loadSavedVideos()">비디오 목록 새로고침</button>
+        <div id="videos-container"></div>
+    </div>
+
+    <div class="container">
+        <h2>🚨 낙상 이벤트 목록</h2>
+        <button onclick="loadFallEvents()">이벤트 목록 새로고침</button>
+        <div id="events-container"></div>
+    </div>
+
+    <div class="container">
+        <h2>📊 API 응답 로그</h2>
+        <button onclick="clearLogs()">로그 지우기</button>
+        <pre id="api-logs"></pre>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:5000/api';
+        const logs = document.getElementById('api-logs');
+
+        function logMessage(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = `[${timestamp}] ${type.toUpperCase()}: ${message}\n`;
+            logs.textContent += logEntry;
+            logs.scrollTop = logs.scrollHeight;
+            console.log(logEntry);
+        }
+
+        function clearLogs() {
+            logs.textContent = '';
+        }
+
+        function showStatus(elementId, message, isSuccess) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="status ${isSuccess ? 'success' : 'error'}">${message}</div>`;
+        }
+
+        async function makeAPICall(endpoint, options = {}) {
+            try {
+                logMessage(`API 호출: ${endpoint}`);
+                
+                const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    ...options
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    logMessage(`성공: ${endpoint} - ${JSON.stringify(data, null, 2)}`, 'success');
+                    return { success: true, data };
+                } else {
+                    logMessage(`오류: ${endpoint} - ${response.status} ${response.statusText}`, 'error');
+                    return { success: false, error: data, status: response.status };
+                }
+            } catch (error) {
+                logMessage(`네트워크 오류: ${endpoint} - ${error.message}`, 'error');
+                return { success: false, error: error.message };
+            }
+        }
+
+        async function testConnection() {
+            logMessage('서버 연결 테스트 시작...');
+            
+            try {
+                const response = await fetch('http://localhost:5000/', {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    showStatus('connection-status', `✅ 서버 연결 성공! ${data.message}`, true);
+                    logMessage(`서버 정보: ${JSON.stringify(data, null, 2)}`, 'success');
+                } else {
+                    showStatus('connection-status', `❌ 서버 응답 오류: ${response.status}`, false);
+                }
+            } catch (error) {
+                showStatus('connection-status', `❌ 서버 연결 실패: ${error.message}`, false);
+                logMessage(`연결 오류: ${error.message}`, 'error');
+            }
+        }
+
+        async function testVideosAPI() {
+            const result = await makeAPICall('/videos/saved?trigger_type=manual&limit=10');
+            
+            if (result.success) {
+                showStatus('connection-status', `✅ 비디오 API 성공: ${result.data.count || 0}개 비디오 발견`, true);
+            } else {
+                showStatus('connection-status', `❌ 비디오 API 실패: ${result.error}`, false);
+            }
+        }
+
+        async function testFallEventsAPI() {
+            const result = await makeAPICall('/events/falls?limit=10');
+            
+            if (result.success) {
+                showStatus('connection-status', `✅ 낙상 이벤트 API 성공: ${result.data.count || 0}개 이벤트 발견`, true);
+            } else {
+                showStatus('connection-status', `❌ 낙상 이벤트 API 실패: ${result.error}`, false);
+            }
+        }
+
+        async function triggerTestFall() {
+            const result = await makeAPICall('/test-fall-alert', {
+                method: 'POST',
+                body: JSON.stringify({ confidence: 0.95 })
+            });
+            
+            if (result.success) {
+                showStatus('connection-status', `✅ 테스트 낙상 트리거 성공!`, true);
+                setTimeout(() => {
+                    loadSavedVideos();
+                    loadFallEvents();
+                }, 2000);
+            } else {
+                showStatus('connection-status', `❌ 테스트 낙상 트리거 실패: ${result.error}`, false);
+            }
+        }
+
+        async function loadSavedVideos() {
+            const container = document.getElementById('videos-container');
+            container.innerHTML = '<div>로딩 중...</div>';
+            
+            const result = await makeAPICall('/videos/saved?trigger_type=manual&limit=20');
+            
+            if (result.success && result.data.videos) {
+                const videos = result.data.videos;
+                
+                if (videos.length === 0) {
+                    container.innerHTML = '<div class="status error">저장된 비디오가 없습니다.</div>';
+                    return;
+                }
+                
+                container.innerHTML = `
+                    <h3>총 ${videos.length}개의 비디오</h3>
+                    ${videos.map(video => `
+                        <div class="video-item">
+                            <strong>📹 ${video.filename || video.name}</strong><br>
+                            <small>ID: ${video.id} | 생성일: ${video.created_at || video.createdAt}</small><br>
+                            <small>확인상태: ${video.processed || video.isChecked ? '✅ 완료' : '⏳ 대기'}</small><br>
+                            <small>신뢰도: ${video.confidence ? (video.confidence * 100).toFixed(1) + '%' : 'N/A'}</small><br>
+                            ${video.url ? `<a href="http://localhost:5000${video.url}" target="_blank">📺 비디오 보기</a>` : ''}
+                        </div>
+                    `).join('')}
+                `;
+            } else {
+                container.innerHTML = '<div class="status error">비디오 로딩 실패</div>';
+            }
+        }
+
+        async function loadFallEvents() {
+            const container = document.getElementById('events-container');
+            container.innerHTML = '<div>로딩 중...</div>';
+            
+            const result = await makeAPICall('/events/falls?limit=20');
+            
+            if (result.success && result.data.data) {
+                const events = result.data.data;
+                
+                if (events.length === 0) {
+                    container.innerHTML = '<div class="status error">낙상 이벤트가 없습니다.</div>';
+                    return;
+                }
+                
+                container.innerHTML = `
+                    <h3>총 ${events.length}개의 낙상 이벤트</h3>
+                    ${events.map(event => `
+                        <div class="video-item">
+                            <strong>🚨 이벤트 #${event.id}</strong><br>
+                            <small>시간: ${event.timestamp || event.created_at}</small><br>
+                            <small>신뢰도: ${(event.confidence * 100).toFixed(1)}%</small><br>
+                            <small>디바이스: ${event.device_id}</small><br>
+                            <small>비디오: ${event.video_filename || '없음'}</small><br>
+                            <small>처리상태: ${event.processed ? '✅ 완료' : '⏳ 대기'}</small>
+                        </div>
+                    `).join('')}
+                `;
+            } else {
+                container.innerHTML = '<div class="status error">이벤트 로딩 실패</div>';
+            }
+        }
+
+        // 페이지 로드 시 자동 실행
+        window.addEventListener('load', () => {
+            logMessage('SafeFall API 테스트 페이지 로드됨');
+            testConnection();
+            loadSavedVideos();
+            loadFallEvents();
+        });
+    </script>
+</body>
+</html>

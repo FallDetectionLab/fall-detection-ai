@@ -1,0 +1,162 @@
+[
+  {
+    "id": 1,
+    "filename": "clip_1703980800.mp4",
+    "createdAt": "2024-12-30T15:30:00.000Z",
+    "isChecked": true,
+    "device_id": "camera_01",
+    "type": "fall",
+    "path": "2024/12/30/camera_01/clip_1703980800.mp4",
+    "url": "/api/v1/media/2024/12/30/camera_01/clip_1703980800.mp4"
+  },
+  {
+    "id": 2,
+    "filename": "clip_1703894400.mp4",
+    "createdAt": "2024-12-29T11:20:00.000Z",
+    "isChecked": false,
+    "device_id": "camera_01",
+    "type": "fall",
+    "path": "2024/12/29/camera_01/clip_1703894400.mp4",
+    "url": "/api/v1/media/2024/12/29/camera_01/clip_1703894400.mp4"
+  },
+  {
+    "id": 3,
+    "filename": "clip_1703808000.mp4",
+    "createdAt": "2024-12-28T09:10:00.000Z",
+    "isChecked": true,
+    "device_id": "camera_02",
+    "type": "fall",
+    "path": "2024/12/28/camera_02/clip_1703808000.mp4",
+    "url": "/api/v1/media/2024/12/28/camera_02/clip_1703808000.mp4"
+  },
+  {
+    "id": 4,
+    "filename": "snapshot_1703721600.jpg",
+    "createdAt": "2024-12-27T14:45:00.000Z",
+    "isChecked": false,
+    "device_id": "camera_01",
+    "type": "frame",
+    "path": "2024/12/27/camera_01/snapshot_1703721600.jpg",
+    "url": "/api/v1/media/2024/12/27/camera_01/snapshot_1703721600.jpg"
+  },
+  {
+    "id": 5,
+    "filename": "clip_1703635200.mp4",
+    "createdAt": "2024-12-26T18:30:00.000Z",
+    "isChecked": true,
+    "device_id": "camera_02",
+    "type": "fall",
+    "path": "2024/12/26/camera_02/clip_1703635200.mp4",
+    "url": "/api/v1/media/2024/12/26/camera_02/clip_1703635200.mp4"
+  },
+  {
+    "id": 6,
+    "filename": "clip_1703548800.mp4",
+    "createdAt": "2024-12-25T12:15:00.000Z",
+    "isChecked": false,
+    "device_id": "camera_01",
+    "type": "fall",
+    "path": "2024/12/25/camera_01/clip_1703548800.mp4",
+    "url": "/api/v1/media/2024/12/25/camera_01/clip_1703548800.mp4"
+  },
+  {
+    "id": 7,
+    "filename": "snapshot_1703462400.jpg",
+    "createdAt": "2024-12-24T08:20:00.000Z",
+    "isChecked": true,
+    "device_id": "camera_02",
+    "type": "frame",
+    "path": "2024/12/24/camera_02/snapshot_1703462400.jpg",
+    "url": "/api/v1/media/2024/12/24/camera_02/snapshot_1703462400.jpg"
+  },
+  {
+    "id": 8,
+    "filename": "clip_1703376000.mp4",
+    "createdAt": "2024-12-23T16:40:00.000Z",
+    "isChecked": false,
+    "device_id": "camera_01",
+    "type": "fall",
+    "path": "2024/12/23/camera_01/clip_1703376000.mp4",
+    "url": "/api/v1/media/2024/12/23/camera_01/clip_1703376000.mp4"
+  },
+  {
+    "id": 9,
+    "filename": "clip_1703289600.mp4",
+    "createdAt": "2024-12-22T10:25:00.000Z",
+    "isChecked": true,
+    "device_id": "camera_02",
+    "type": "fall",
+    "path": "2024/12/22/camera_02/clip_1703289600.mp4",
+    "url": "/api/v1/media/2024/12/22/camera_02/clip_1703289600.mp4"
+  },
+  {
+    "id": 10,
+    "filename": "snapshot_1703203200.jpg",
+    "createdAt": "2024-12-21T13:50:00.000Z",
+    "isChecked": false,
+    "device_id": "camera_01",
+    "type": "frame",
+    "path": "2024/12/21/camera_01/snapshot_1703203200.jpg",
+    "url": "/api/v1/media/2024/12/21/camera_01/snapshot_1703203200.jpg"
+  },
+  {
+    "id": 11,
+    "filename": "clip_1703116800.mp4",
+    "createdAt": "2024-12-20T07:15:00.000Z",
+    "isChecked": true,
+    "device_id": "camera_02",
+    "type": "fall",
+    "path": "2024/12/20/camera_02/clip_1703116800.mp4",
+    "url": "/api/v1/media/2024/12/20/camera_02/clip_1703116800.mp4"
+  },
+  {
+    "id": 12,
+    "filename": "clip_1703030400.mp4",
+    "createdAt": "2024-12-19T19:30:00.000Z",
+    "isChecked": false,
+    "device_id": "camera_01",
+    "type": "fall",
+    "path": "2024/12/19/camera_01/clip_1703030400.mp4",
+    "url": "/api/v1/media/2024/12/19/camera_01/clip_1703030400.mp4"
+  },
+  {
+    "id": 13,
+    "filename": "snapshot_1702944000.jpg",
+    "createdAt": "2024-12-18T11:45:00.000Z",
+    "isChecked": true,
+    "device_id": "camera_02",
+    "type": "frame",
+    "path": "2024/12/18/camera_02/snapshot_1702944000.jpg",
+    "url": "/api/v1/media/2024/12/18/camera_02/snapshot_1702944000.jpg"
+  },
+  {
+    "id": 14,
+    "filename": "clip_1702857600.mp4",
+    "createdAt": "2024-12-17T15:20:00.000Z",
+    "isChecked": false,
+    "device_id": "camera_01",
+    "type": "fall",
+    "path": "2024/12/17/camera_01/clip_1702857600.mp4",
+    "url": "/api/v1/media/2024/12/17/camera_01/clip_1702857600.mp4"
+  },
+  {
+    "id": 15,
+    "filename": "clip_1702771200.mp4",
+    "createdAt": "2024-12-16T09:35:00.000Z",
+    "isChecked": true,
+    "device_id": "camera_02",
+    "type": "fall",
+    "path": "2024/12/16/camera_02/clip_1702771200.mp4",
+    "url": "/api/v1/media/2024/12/16/camera_02/clip_1702771200.mp4"
+  },
+  {
+    "id": 16,
+    "filename": "snapshot_1702684800.jpg",
+    "createdAt": "2024-12-15T21:10:00.000Z",
+    "isChecked": false,
+    "device_id": "camera_01",
+    "type": "frame",
+    "path": "2024/12/15/camera_01/snapshot_1702684800.jpg",
+    "url": "/api/v1/media/2024/12/15/camera_01/snapshot_1702684800.jpg"
+  }
+]

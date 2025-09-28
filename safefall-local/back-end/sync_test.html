@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeFall 동기화 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+            font-size: 14px;
+        }
+        .button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .log-output {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ SafeFall 데이터베이스 동기화 도구</h1>
+        <p>비디오 파일과 데이터베이스 동기화 상태를 확인하고 수정할 수 있습니다.</p>
+    </div>
+
+    <div class="stats-grid" id="statsGrid">
+        <div class="stat-card">
+            <div class="stat-number" id="totalVideos">-</div>
+            <div class="stat-label">총 비디오 파일</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" id="dbVideos">-</div>
+            <div class="stat-label">DB 등록된 비디오</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" id="missingVideos">-</div>
+            <div class="stat-label">누락된 비디오</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-number" id="syncRate">-%</div>
+            <div class="stat-label">동기화 비율</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>🔧 동기화 작업</h3>
+        <button class="button" onclick="checkStatus()">📊 현재 상태 확인</button>
+        <button class="button" onclick="syncMissingVideos()" id="syncBtn">🔄 누락된 비디오 동기화</button>
+        <button class="button" onclick="testFallAlert()">🚨 테스트 낙상 알림</button>
+        <button class="button" onclick="clearLogs()">🗑️ 로그 지우기</button>
+        
+        <div id="statusMessage"></div>
+    </div>
+
+    <div class="card">
+        <h3>📝 작업 로그</h3>
+        <div id="logOutput" class="log-output">SafeFall 동기화 도구가 시작되었습니다.</div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+        let isWorking = false;
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logOutput = document.getElementById('logOutput');
+            const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+            logOutput.textContent += `\n[${timestamp}] ${prefix} ${message}`;
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('statusMessage');
+            statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+            log(message, type);
+        }
+
+        function setWorking(working) {
+            isWorking = working;
+            document.getElementById('syncBtn').disabled = working;
+        }
+
+        async function checkStatus() {
+            log('현재 상태 확인 중...');
+            try {
+                const response = await fetch(`${API_BASE}/videos/saved`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateStats({
+                        totalVideos: data.count,
+                        dbVideos: data.count,
+                        missingVideos: 0,
+                        syncRate: 100
+                    });
+                    showStatus(`현재 ${data.count}개의 비디오가 데이터베이스에 등록되어 있습니다.`, 'success');
+                } else {
+                    showStatus('상태 확인 실패: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showStatus('서버 연결 오류: ' + error.message, 'error');
+            }
+        }
+
+        async function syncMissingVideos() {
+            if (isWorking) return;
+            
+            setWorking(true);
+            log('누락된 비디오 동기화 시작...');
+            
+            try {
+                const response = await fetch(`${API_BASE}/videos/sync`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const stats = {
+                        totalVideos: data.total_videos,
+                        dbVideos: data.db_videos_before + data.registered,
+                        missingVideos: data.failed,
+                        syncRate: Math.round(((data.db_videos_before + data.registered) / data.total_videos) * 100)
+                    };
+                    updateStats(stats);
+                    
+                    showStatus(
+                        `동기화 완료! ${data.registered}개 영상이 새로 등록되었습니다. ` +
+                        `(실패: ${data.failed}개)`, 
+                        data.failed === 0 ? 'success' : 'info'
+                    );
+                    
+                    if (data.registered_videos && data.registered_videos.length > 0) {
+                        log('등록된 비디오:');
+                        data.registered_videos.forEach(video => {
+                            log(`  ✅ ${video.filename} -> ID:${video.event_id}`, 'success');
+                        });
+                    }
+                    
+                    if (data.failed_videos && data.failed_videos.length > 0) {
+                        log('실패한 비디오:');
+                        data.failed_videos.forEach(video => {
+                            log(`  ❌ ${video.filename}: ${video.error}`, 'error');
+                        });
+                    }
+                    
+                } else {
+                    showStatus('동기화 실패: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showStatus('동기화 요청 오류: ' + error.message, 'error');
+            } finally {
+                setWorking(false);
+            }
+        }
+
+        async function testFallAlert() {
+            log('테스트 낙상 알림 발송 중...');
+            try {
+                const response = await fetch(`${API_BASE}/test-fall-alert`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        confidence: 0.95
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showStatus('테스트 낙상 알림이 성공적으로 발송되었습니다!', 'success');
+                    if (data.detection && data.detection.event_id) {
+                        log(`새로운 이벤트 생성됨: ID ${data.detection.event_id}`, 'success');
+                    }
+                } else {
+                    showStatus('테스트 알림 실패: ' + data.error, 'error');
+                }
+            } catch (error) {
+                showStatus('테스트 알림 요청 오류: ' + error.message, 'error');
+            }
+        }
+
+        function updateStats(stats) {
+            document.getElementById('totalVideos').textContent = stats.totalVideos;
+            document.getElementById('dbVideos').textContent = stats.dbVideos;
+            document.getElementById('missingVideos').textContent = stats.missingVideos;
+            document.getElementById('syncRate').textContent = stats.syncRate + '%';
+        }
+
+        function clearLogs() {
+            document.getElementById('logOutput').textContent = 'SafeFall 동기화 도구가 시작되었습니다.';
+            document.getElementById('statusMessage').innerHTML = '';
+            log('로그가 지워졌습니다.');
+        }
+
+        // 페이지 로드시 자동으로 상태 확인
+        window.addEventListener('load', () => {
+            log('SafeFall 동기화 도구 준비 완료');
+            checkStatus();
+        });
+    </script>
+</body>
+</html>

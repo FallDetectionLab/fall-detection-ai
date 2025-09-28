@@ -1,0 +1,253 @@
+/* BeforeLogin 기본 스타일 */
+.BeforeLoginWindow {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.OurInfo {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 24px;
+}
+
+.BeforeSignInSignUpBox button {
+    display: block;
+    width: 160px;
+    height: 44px;
+    background: #fff;
+    border: 2px solid #69BDF9;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+.BeforeSignInSignUpBox button:hover {
+    color: #fff;
+    background: #69BDF9;
+}
+
+.SimpleInfo h3 {
+    font-size: 20px;
+    font-weight: normal;
+}
+
+.SimpleInfo p {
+    font-size: 14px;
+}
+
+.SimpleInfoImg {
+    display: flex;
+    overflow: hidden;
+}
+
+.SimpleInfo {
+    position: relative;
+}
+.OurInfo001 {
+  background: linear-gradient(135deg, #69bdf900 0%, #69bdf956 75%, #69BDF9 100%);
+}
+.OurInfo002 {
+  background: linear-gradient(135deg, #69BDF9 0%, #69bdf956 25%, #69bdf900 75%);
+}
+
+.OurInfo003 {
+  background: linear-gradient(135deg, #69bdf900 0%, #69bdf956 75%, #69BDF9 100%);
+}
+.OurInfo004 {
+  background: linear-gradient(135deg, #69BDF9 0%, #69bdf956 25%, #69bdf900 75%);
+}
+
+.OurInfo005 {
+  background: linear-gradient(135deg, #69bdf900 0%, #69bdf956 75%, #69BDF9 100%);
+}
+/* 무한 슬라이더 스타일 */
+.infinite-slider-wrapper {
+    width: 100%;
+    overflow: hidden;
+}
+
+.infinite-slider-track {
+    display: flex;
+    width: max-content;
+    animation: infiniteSlide linear infinite;
+}
+
+.infinite-slider-img {
+    width: 240px;
+    height: auto;
+    margin-right: 10px;
+    flex-shrink: 0;
+    box-shadow: 2px 1px 5px rgba(0, 0, 0, 0.5);
+}
+
+/* 무한 슬라이드 애니메이션 */
+@keyframes infiniteSlide {
+    0% {
+        transform: translateX(0);
+    }
+    100% {
+        transform: translateX(-33.333%); /* 3개 그룹 중 1개 그룹만큼 이동 */
+    }
+}
+
+/* 호버 시 애니메이션 일시정지 */
+.infinite-slider-wrapper:hover .infinite-slider-track {
+    animation-play-state: paused;
+}
+
+/* 데스크톱 스타일 (1200px 이상) */
+@media screen and (min-width: 1200px) {
+    .OurInfo {
+        max-width: 1440px;
+        min-width: 1200px;
+        margin-bottom: 120px;
+    }
+    
+    .OurInfo002, .OurInfo004 {
+        flex-direction: row-reverse;
+    }
+    
+    .BeforeSignInSignUpBox {
+        position: absolute;
+        left: 0;
+        bottom: -90px;
+        width: 100%;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 16px;
+    }
+    
+    .BeforeSignInSignUpBox p {
+        font-size: 24px;
+        color: #69BDF9;
+    }
+    
+    .SimpleInfoImg {
+        width: 522px;
+    }
+    
+    .SimpleInfoMobile {
+        width: 430px;
+        height: 130px;
+        display: flex;
+        flex-direction: column;
+        gap: 24px;
+    }
+    
+    /* 무한 슬라이더 데스크톱 스타일 */
+    .infinite-slider-img {
+        width: 240px;
+        margin-right: 15px;
+    }
+}
+
+/* 태블릿 스타일 (720px ~ 1200px) */
+@media screen and (max-width: 1200px) and (min-width: 720px) {
+    .OurInfo {
+        width: 100%;
+        flex-direction: column-reverse;
+    }
+    
+    .SimpleInfo {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 24px;
+        position: relative;
+    }
+    
+    .SimpleInfoImg {
+        width: 100%;
+    }
+    
+    .SimpleInfoMobile {
+        width: 480px;
+        height: 170px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 24px;
+        margin: 24px 0;
+        padding: 24px 12px;
+        background: #fff;
+        border-radius: 24px;
+        border: 2px solid #69BDF9;
+    }
+    .SimpleInfoMobile h3, .SimpleInfoMobile p {
+        text-align: center;
+    }
+    
+    .SimpleInfo p {
+        width: 380px;
+    }
+    
+    .BeforeSignInSignUpBox {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    
+    /* 무한 슬라이더 태블릿 스타일 */
+    .infinite-slider-img {
+        width: 200px;
+        margin-right: 12px;
+    }
+}
+
+/* 모바일 스타일 (320px ~ 720px) */
+@media screen and (max-width: 720px) and (min-width: 320px) {
+    .OurInfo {
+        width: 100%;
+        flex-direction: column-reverse;
+    }
+    
+    .SimpleInfo {
+        width: 100%;
+    }
+    
+    .SimpleInfoImg {
+        width: 100%;
+    }
+    
+    .SimpleInfoMobile {
+        width: 100%;
+        height: 170px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        gap: 24px;
+        margin: 24px 0;
+        padding: 24px 12px;
+        background: #fff;
+        border-radius: 24px;
+        border: 2px solid #69BDF9;
+    }
+    .SimpleInfoMobile h3, .SimpleInfoMobile p {
+        text-align: center;
+    }
+    
+    .SimpleInfo p {
+        width: 315px;
+        text-align: center;
+    }
+    
+    .BeforeSignInSignUpBox {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+    
+    /* 무한 슬라이더 모바일 스타일 */
+    .infinite-slider-img {
+        width: 160px;
+        margin-right: 10px;
+    }
+}

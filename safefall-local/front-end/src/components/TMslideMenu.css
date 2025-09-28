@@ -1,0 +1,169 @@
+/* TMslideMenu 애니메이션 CSS */
+
+/* 메뉴 박스 */
+.TMmenuBox {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 9999;
+  pointer-events: none; /* 닫힌 상태에서 클릭 방지 */
+}
+
+.TMmenuBox.open {
+  pointer-events: auto; /* 열린 상태에서 클릭 가능 */
+}
+
+/* 배경 오버레이 */
+.TMmenuBG {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.TMmenuBox.open .TMmenuBG {
+  opacity: 1;
+}
+
+/* 메뉴 패널 */
+.TMmenu {
+  position: absolute;
+  top: 0;
+  right: -320px; /* 초기에는 화면 밖에 위치 */
+  width: 320px;
+  height: 100%;
+  background: white;
+  box-shadow: -2px 0 10px rgba(0, 0, 0, 0.1);
+  transition: right 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+}
+
+.TMmenuBox.open .TMmenu {
+  right: 0; /* 열릴 때 화면 안으로 이동 */
+}
+
+
+/* 사용자 정보 (로그인된 경우) */
+.TMmenuUserInfo {
+  padding: 20px;
+}
+
+.TMmenuUserInfo p {
+  margin: 0;
+  color: #333;
+  font-size: 0.85rem;
+}
+
+.TMmenuUserInfo strong {
+  color: #69BDF9;
+}
+
+/* 메뉴 리스트 */
+.TMmenu ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.TMmenu li {
+  padding: 18px 20px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  font-size: 1rem;
+  color: #333;
+}
+
+.TMmenu li:hover {
+  background: #f8f9fa;
+  color: #69BDF9;
+}
+
+.TMmenu li:last-child {
+  border-bottom: none;
+}
+
+/* 로그인 박스 */
+
+.TMmenuLoginBox button:hover {
+  background: #69BDF9;
+  color: white;
+}
+/* 모바일 최적화 */
+@media (max-width: 480px) {
+  .TMmenu {
+    width: 280px;
+    right: -280px;
+  }
+  
+  .TMmenuLogobox {
+    padding: 15px;
+  }
+  
+  .TMmenu li {
+    padding: 15px 20px;
+    font-size: 0.95rem;
+  }
+  
+  .TMmenuUserInfo {
+    padding: 15px 20px;
+  }
+  
+  .TMmenuLoginBox {
+    padding: 15px 20px;
+  }
+}
+
+/* 태블릿 최적화 */
+@media (min-width: 481px) and (max-width: 768px) {
+  .TMmenu {
+    width: 300px;
+    right: -300px;
+  }
+}
+
+
+.TMmenuLoginBox {
+    padding: 20px;
+    border-top: 1px solid #e9ecef;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.TMmenuLoginBox > button {
+    display: block;
+    width: 100px;
+    padding: 12px 20px;
+    border: 2px solid #69BDF9;
+    background: none;
+    color: #69bdf9;
+    border-radius: 8px;
+    font-size: .75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .3s ease;
+}
+
+.TMmenuLogobox-header {
+    padding: 20px;
+    background: #bde3ff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.TMmenuLogobox-header div {
+    width: 100px;
+    height: 30px;
+}

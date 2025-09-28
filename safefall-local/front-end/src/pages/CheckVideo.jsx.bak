@@ -1,0 +1,401 @@
+import { useState, useEffect, useRef, useMemo } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+
+import WindowSize from "../hooks/windowSize";
+import { getBackendBaseUrl, getApiBaseUrl, joinUrl } from "../utils/backendUrls";
+import VideoBtnSmall from "../components/SVG-VideoBtnSmall";
+
+import "./CheckVideo.css";
+
+const buildFallbackMeta = (filename) => ({
+  id: null,
+  filename,
+  name: filename,
+  title: `Recorded Video - ${filename}`,
+  createdAt: new Date().toISOString(),
+  isChecked: false,
+  confidence: 0.95,
+});
+
+const formatTime = (seconds) => {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00";
+  const mins = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const secs = Math.floor(seconds % 60)
+    .toString()
+    .padStart(2, "0");
+  return `${mins}:${secs}`;
+};
+
+const formatDate = (isoString) => {
+  if (!isoString) return "Unknown";
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return isoString;
+  return date.toLocaleString();
+};
+
+const formatBytes = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "Unknown";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+function CheckVideo({
+  incidentVideos = [],
+  updateVideoCheckStatus,
+  LiveVideoComponent,
+}) {
+  const { id, filename } = useParams();
+  const navigate = useNavigate();
+  const { width } = WindowSize();
+  const videoRef = useRef(null);
+
+  const backendBase = useMemo(() => getBackendBaseUrl(), []);
+  const apiBase = useMemo(() => getApiBaseUrl(), []);
+  const mediaUrlBuilder = useMemo(
+    () => (path) => {
+      if (!path) return null;
+      if (/^https?:\/\//i.test(path)) return path;
+      return joinUrl(backendBase, path);
+    },
+    [backendBase]
+  );
+
+  const [videoData, setVideoData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [videoError, setVideoError] = useState(null);
+  const [fileSizeBytes, setFileSizeBytes] = useState(null);
+
+  const isDesktop = width >= 720;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const findInProvidedList = (targetId, targetFilename) => {
+      if (!incidentVideos.length) return null;
+      if (targetId) {
+        const matchById = incidentVideos.find((item) => String(item.id) === String(targetId));
+        if (matchById) return matchById;
+      }
+      if (targetFilename) {
+        const matchByName = incidentVideos.find((item) => item.filename === targetFilename);
+        if (matchByName) return matchByName;
+      }
+      return null;
+    };
+
+    const resolveFilename = () => {
+      if (id && id.includes(".")) {
+        const lowered = id.toLowerCase();
+        if (lowered.endsWith(".mp4") || lowered.endsWith(".avi")) {
+          try {
+            return decodeURIComponent(id);
+          } catch (error) {
+            return id;
+          }
+        }
+      }
+      return filename || null;
+    };
+
+    const resolveId = () => {
+      if (!id) return null;
+      if (id.includes(".")) return null;
+      return id;
+    };
+
+    const loadVideo = async () => {
+      setLoading(true);
+      setVideoError(null);
+
+      const actualFilename = resolveFilename();
+      const actualId = resolveId();
+
+      const cached = findInProvidedList(actualId, actualFilename);
+      if (cached) {
+        if (!cancelled) {
+          const candidateUrl = cached.url || cached.path || `/media/videos/${cached.filename}`;
+          setVideoData(cached);
+          setVideoUrl(mediaUrlBuilder(candidateUrl));
+          setFileSizeBytes(cached.size || cached.filesize);
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (actualFilename) {
+        if (!cancelled) {
+          setVideoData(buildFallbackMeta(actualFilename));
+          setVideoUrl(mediaUrlBuilder(`/media/videos/${actualFilename}`));
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (actualId) {
+        try {
+          const response = await fetch(joinUrl(apiBase, `videos/${actualId}`));
+          if (!response.ok) {
+            throw new Error(`Backend responded with ${response.status}`);
+          }
+          const payload = await response.json();
+          const video = payload?.video;
+          if (!video) {
+            throw new Error("Video payload missing");
+          }
+          if (!cancelled) {
+            const candidateUrl = video.url || video.path || (video.filename ? `/media/videos/${video.filename}` : null);
+            setVideoData(video);
+            setVideoUrl(mediaUrlBuilder(candidateUrl));
+            setFileSizeBytes(video.size || video.filesize);
+            setLoading(false);
+          }
+          return;
+        } catch (error) {
+          if (!cancelled) {
+            setVideoError("Failed to load video details from the server.");
+            setLoading(false);
+          }
+          return;
+        }
+      }
+
+      if (!cancelled) {
+        setVideoError("Video information is unavailable.");
+        setLoading(false);
+      }
+    };
+
+    loadVideo();
+    return () => {
+      cancelled = true;
+    };
+  }, [id, filename, incidentVideos, apiBase, mediaUrlBuilder]);
+
+  useEffect(() => {
+    if (!videoUrl || !videoUrl.startsWith("http")) {
+      return undefined;
+    }
+
+    let aborted = false;
+
+    const fetchFileSize = async () => {
+      try {
+        const head = await fetch(videoUrl, { method: "HEAD" });
+        if (!head.ok) return;
+        const size = Number(head.headers.get("Content-Length"));
+        if (!Number.isNaN(size) && !aborted) {
+          setFileSizeBytes(size);
+        }
+      } catch (error) {
+        // file size is optional
+      }
+    };
+
+    fetchFileSize();
+    return () => {
+      aborted = true;
+    };
+  }, [videoUrl]);
+
+  const handlePlayToggle = () => {
+    const element = videoRef.current;
+    if (!element) return;
+    if (isPlaying) {
+      element.pause();
+      return;
+    }
+    element
+      .play()
+      .then(() => setVideoError(null))
+      .catch((error) => {
+        console.error("Video play error", error);
+        setVideoError("Unable to start playback. Try downloading the file instead.");
+      });
+  };
+
+  const handleVideoPlay = () => setIsPlaying(true);
+  const handleVideoPause = () => setIsPlaying(false);
+  const handleVideoTimeUpdate = () => {
+    if (videoRef.current) {
+      setCurrentTime(videoRef.current.currentTime);
+    }
+  };
+  const handleVideoLoadedMetadata = () => {
+    if (videoRef.current) {
+      setDuration(videoRef.current.duration);
+    }
+  };
+  const handleVideoError = (event) => {
+    console.error("Video load error", event);
+    setVideoError("Failed to load the video file.");
+  };
+
+  const handleProgressClick = (event) => {
+    if (!videoRef.current || duration <= 0) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ratio = (event.clientX - rect.left) / rect.width;
+    const nextTime = ratio * duration;
+    videoRef.current.currentTime = nextTime;
+    setCurrentTime(nextTime);
+  };
+
+  const handleToggleCheck = () => {
+    if (!videoData || !updateVideoCheckStatus) return;
+    const key = videoData.id ?? videoData.filename;
+    if (!key) return;
+    const next = !videoData.isChecked;
+    updateVideoCheckStatus(key, next);
+    setVideoData((prev) => (prev ? { ...prev, isChecked: next } : prev));
+  };
+
+  const handleGoBack = () => navigate(-1);
+
+  const handleSyncVideos = async () => {
+    try {
+      const response = await fetch(joinUrl(apiBase, "videos/sync"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) {
+        throw new Error(`Backend responded with ${response.status}`);
+      }
+      alert("Video sync request was sent.");
+    } catch (error) {
+      console.error("Video sync error", error);
+      alert("Failed to trigger sync. Check the backend logs.");
+    }
+  };
+
+  const renderVideoElement = () => {
+    if (videoError) {
+      return (
+        <div className="videoError">
+          <VideoBtnSmall />
+          <p>{videoError}</p>
+          {videoUrl && (
+            <button onClick={() => window.open(videoUrl, "_blank")}>Open in new tab</button>
+          )}
+        </div>
+      );
+    }
+
+    if (videoUrl) {
+      return (
+        <video
+          ref={videoRef}
+          src={videoUrl}
+          onPlay={handleVideoPlay}
+          onPause={handleVideoPause}
+          onTimeUpdate={handleVideoTimeUpdate}
+          onLoadedMetadata={handleVideoLoadedMetadata}
+          onError={handleVideoError}
+          controls={false}
+          style={{ width: "100%", height: "100%", objectFit: "contain", backgroundColor: "#000" }}
+        />
+      );
+    }
+
+    return (
+      <div className="videoPlaceholder">
+        <VideoBtnSmall />
+        <p>Video is loading...</p>
+      </div>
+    );
+  };
+
+  return (
+    <div className="CheckVideoPage">
+      <div className="videoHeader">
+        <button className="backButton" onClick={handleGoBack}>
+          Back
+        </button>
+        <div className="headerActions">
+          <button onClick={handleSyncVideos}>Sync videos</button>
+          <button onClick={() => LiveVideoComponent && navigate("/live")}>Live view</button>
+        </div>
+      </div>
+
+      <div className={`videoLayout ${isDesktop ? "desktop" : "mobile"}`}>
+        <div className="videoPlayerSection">
+          <div className="videoStage">
+            {renderVideoElement()}
+            {!isPlaying && videoUrl && !videoError && (
+              <div className="playOverlay" onClick={handlePlayToggle}>
+                <div className="playButton">Play</div>
+              </div>
+            )}
+          </div>
+
+          <div className="videoControls">
+            <button
+              className={`playBtn ${isPlaying ? "playing" : ""}`}
+              onClick={handlePlayToggle}
+              disabled={!videoUrl || Boolean(videoError)}
+            >
+              {isPlaying ? "Pause" : "Play"}
+            </button>
+            <div className="videoProgress" onClick={handleProgressClick}>
+              <div className="progressBar">
+                <div className="progress" style={{ width: duration > 0 ? `${(currentTime / duration) * 100}%` : "0%" }} />
+              </div>
+              <span className="timeInfo">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div className="videoInfoSection">
+          {loading && <p>Loading video details...</p>}
+          {!loading && videoData && (
+            <div className="videoInfo">
+              <h2>{videoData.title || videoData.filename}</h2>
+              <div className="infoGrid">
+                <div className="infoItem">
+                  <label>Created</label>
+                  <span>{formatDate(videoData.createdAt || videoData.created_at)}</span>
+                </div>
+                <div className="infoItem">
+                  <label>File size</label>
+                  <span>{formatBytes(fileSizeBytes)}</span>
+                </div>
+                <div className="infoItem">
+                  <label>Duration</label>
+                  <span>{duration > 0 ? formatTime(duration) : "Unknown"}</span>
+                </div>
+                <div className="infoItem">
+                  <label>Confidence</label>
+                  <span>{videoData.confidence ? `${(videoData.confidence * 100).toFixed(1)}%` : "-"}</span>
+                </div>
+              </div>
+
+              <div className="checkStatusSection">
+                <div className="statusInfo">
+                  <label>Status</label>
+                  <div className={videoData.isChecked ? "statusBadge checked" : "statusBadge unchecked"}>
+                    {videoData.isChecked ? "Reviewed" : "Pending"}
+                  </div>
+                </div>
+                <button
+                  className={`toggleCheckBtn ${videoData.isChecked ? "checked" : "unchecked"}`}
+                  onClick={handleToggleCheck}
+                >
+                  {videoData.isChecked ? "Mark as pending" : "Mark as reviewed"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default CheckVideo;
